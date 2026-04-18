@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2026 Twoje Imię i Nazwisko
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ *   @file
+ *   @brief Memory address map, default values and configs
+ *   for BMP280 sensor according to datasheet
+ */
+
+// Chip id number mem addr
+#define BMP280_ADDR_ID 0xD0
+
+// Pressure mem addrs
+#define BMP280_ADDR_PRESS_MSB 0xF7
+#define BMP280_ADDR_PRESS_LSB 0xF8
+#define BMP280_ADDR_PRESS_XLSB 0xF9
+
+// Temperature mem addrs
+#define BMP280_ADDR_TEMP_MSB 0xFA
+#define BMP280_ADDR_TEMP_LSB 0xFB
+#define BMP280_ADDR_TEMP_XLSB 0xFC
+
+// Reset mem addrs
+#define BMP280_ADDR_RESET 0xE0
+
+// Configs and status mem addrs
+#define BMP280_ADDR_CONFIG 0XF5
+#define BMP280_ADDR_CTRL_MEAS 0XF4
+#define BMP280_ADDR_STATUS 0XF3
+
+// Calibration data mem addrs
+#define BMP280_ADDR_CALIB00 0x88
+
+// Predefined vals
+#define BMP280_SENSOR_ID 0x58
+#define BMP280_NO_VALUE_1 0x80
+
+#define BMP280_MODE_SLEEP 0b00
+#define BMP280_MODE_FORCED 0b01
+#define BMP280_MODE_NORMAL 0b11
+
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_0 0b00100000 // same as BMP280_OVERSAMPLING_TEMPERATURE_X_1 as temperature is required for proper pressure readings
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_1 0b00100000
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_2 0b01000000
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_4 0b01100000
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_8 0b10000000
+#define BMP280_OVERSAMPLING_TEMPERATURE_X_16 0b10100000
+
+#define BMP280_OVERSAMPLING_PRESSURE_X_0 0b00000000
+#define BMP280_OVERSAMPLING_PRESSURE_X_1 0b00000100
+#define BMP280_OVERSAMPLING_PRESSURE_X_2 0b00001000
+#define BMP280_OVERSAMPLING_PRESSURE_X_4 0b00001100
+#define BMP280_OVERSAMPLING_PRESSURE_X_8 0b00010000
+#define BMP280_OVERSAMPLING_PRESSURE_X_16 0b00010100
+
+#define BMP280_MODE_FORCED 0b01
+#define BMP280_MODE_NORMAL 0b11
+
+// Masks
+#define BMP280_CTRL_MEAS_MODE 0b00000011
+#define BMP280_CTRL_MEAS_OSRS_T 0b11100000
+#define BMP280_CTRL_MEAS_OSRS_TP 0b00011100
