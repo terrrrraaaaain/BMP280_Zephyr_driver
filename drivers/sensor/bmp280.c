@@ -18,7 +18,7 @@
 
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/spi.h>k.v
+#include <zephyr/drivers/spi.h>
 #include "bmp280_priv.h"
 /*
 chanels
@@ -416,7 +416,7 @@ static int bmp280_softReset(const struct device *dev)
 		printk("I2C err\n");
 		return -ENODEV;
 	}
-	int c = conf->ioAPI.methods.writeByte(&(conf->i2c_bus), BMP280_ADDR_RESET, BMP280_RESET);
+	int c = conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_RESET, BMP280_RESET);
 	if (c)
 		return c;
 	return bmp280_init(dev);
@@ -479,7 +479,7 @@ static uint16_t bmp280_timeToRead_ms(const struct device *dev)
 /*
  *	 bmp280 IO API I2C
  */
-
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(i2c)
 static int bmp280_i2c_readBurst(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
 {
 	const struct bmp280_config *conf = dev->config;
@@ -487,13 +487,13 @@ static int bmp280_i2c_readBurst(const struct device *dev, uint8_t addr, uint8_t 
 	return i2c_burst_read_dt(&(conf->ioAPI.bus.i2c), addr, buffer, size);
 }
 
-static int bmp280_i2c_writeBurst(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+static int bmp280_i2c_writeBurst(const struct device *dev, uint8_t addr, const uint8_t *buffer, size_t size)
 {
 	const struct bmp280_config *conf = dev->config;
 	return i2c_burst_write_dt(&(conf->ioAPI.bus.i2c), addr, buffer, size);
 }
 
-static int bmp280_i2c_readByte(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+static int bmp280_i2c_readByte(const struct device *dev, uint8_t addr, uint8_t *buffer)
 {
 	const struct bmp280_config *conf = dev->config;
 
@@ -508,16 +508,58 @@ static int bmp280_i2c_writeByte(const struct device *dev, uint8_t addr, uint8_t 
 
 static inline bool bmp280_i2c_isBusReady(const struct device *dev)
 {
-	return device_is_ready(((struct bmp280_config *) dev->config)->ioAPI.bus.i2c.bus);
+	return device_is_ready(((struct bmp280_config *)dev->config)->ioAPI.bus.i2c.bus);
 }
 
-const struct bmp280_ioMethods bmp280_i2c_ioMethods = {
+const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 	.readBurst = bmp280_i2c_readBurst,
 	.writeBurst = bmp280_i2c_writeBurst,
 	.readByte = bmp280_i2c_readByte,
 	.writeByte = bmp280_i2c_writeByte,
 	.isBusReady = bmp280_i2c_isBusReady,
 };
+#endif
+
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+
+static int bmp280_spi_readBurst(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+{
+	const struct bmp280_config *conf = dev->config;
+
+	return -ENOTSUP
+}
+
+static int bmp280_spi_writeBurst(const struct device *dev, uint8_t addr, const uint8_t *buffer, size_t size)
+{
+	const struct bmp280_config *conf = dev->config;
+	return -ENOTSUP
+}
+
+static int bmp280_spi_readByte(const struct device *dev, uint8_t addr, uint8_t *buffer)
+{
+	const struct bmp280_config *conf = dev->config;
+	return -ENOTSUP
+}
+
+static int bmp280_spi_writeByte(const struct device *dev, uint8_t addr, uint8_t buffer)
+{
+	const struct bmp280_config *conf = dev->config;
+	return -ENOTSUP
+}
+
+static inline bool bmp280_spic_isBusReady(const struct device *dev)
+{
+	return -ENOTSUP
+}
+
+const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
+	.readBurst = bmp280_spi_readBurst,
+	.writeBurst = bmp280_spi_writeBurst,
+	.readByte = bmp280_spi_readByte,
+	.writeByte = bmp280_spi_writeByte,
+	.isBusReady = bmp280_spi_isBusReady,
+};
+#endif
 
 /*
  *	Zephyr sensor API integration
@@ -532,18 +574,23 @@ const struct sensor_driver_api bmp280_api = {
 	.get_decoder = NULL,
 	.submit = NULL,
 };
+#define BMP280_ON_I2C_DEF(inst) {.i2c = I2C_DT_SPEC_INST_GET(inst)}
+#define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
 
 #define BMP280_DEF(inst)                                                   \
 	static struct bmp280_data bmp280_data_##inst = {                       \
 		/* initialize RAM values as needed, e.g.: */                       \
 	};                                                                     \
-	static const struct bmp280_ioAPI bmp280_IOapi_##inst = {               \
-		.bus.i2c = I2C_DT_SPEC_INST_GET(inst),                             \
-		.methods = bmp280_i2c_ioMethods,                                   \
-	};                                                                     \
 	static const struct bmp280_config bmp280_config_##inst = {             \
-		.ioAPI = bmp280_IOapi_##inst,                                      \
-		.i2c_bus = I2C_DT_SPEC_INST_GET(inst),                             \
+		.ioAPI = {                                                         \
+			.bus = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),                  \
+							   (BMP280_ON_I2C_DEF(inst)),                  \
+							   (BMP280_ON_SPI_DEF(inst))),                 \
+                                                                           \
+			.methods = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),              \
+								   (bmp280_i2c_ioMethods_set),             \
+								   (bmp280_spi_ioMethods_set)),            \
+		},                                                                 \
 	};                                                                     \
 	SENSOR_DEVICE_DT_INST_DEFINE(inst,                                     \
 								 bmp280_init,                              \
