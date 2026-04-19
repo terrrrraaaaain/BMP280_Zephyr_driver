@@ -18,7 +18,7 @@
 
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/i2c.h>
-#include <zephyr/drivers/spi.h>k.v      
+#include <zephyr/drivers/spi.h>k.v
 #include "bmp280_priv.h"
 /*
 chanels
@@ -65,15 +65,16 @@ struct bmp280_calibData
 
 struct bmp280_ioMethods
 {
-	int (*readByte)(const struct device *dev, uint8_t addr, void *buffer);
-	int (*readBurst)(const struct device *dev, uint8_t addr, void *buffer, size_t size);
-	int (*writeByte)(const struct device *dev, uint8_t addr, void *buffer);
-	int (*writeBurst)(const struct device *dev, uint8_t addr, const void *buffer, size_t size);
+	bool (*isBusReady)(const struct device *dev);
+	int (*readByte)(const struct device *dev, uint8_t addr, uint8_t *buffer);
+	int (*readBurst)(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size);
+	int (*writeByte)(const struct device *dev, uint8_t addr, uint8_t buffer);
+	int (*writeBurst)(const struct device *dev, uint8_t addr, const uint8_t *buffer, size_t size);
 };
 
 struct bmp280_ioAPI
 {
-	struct bmp280_ioMethods f;
+	struct bmp280_ioMethods methods;
 	union bmp280_bus
 	{
 		struct i2c_dt_spec i2c;
@@ -84,6 +85,7 @@ struct bmp280_ioAPI
 struct bmp280_config
 {
 	struct i2c_dt_spec i2c_bus;
+	struct bmp280_ioAPI ioAPI;
 };
 
 struct bmp280_data
@@ -130,9 +132,9 @@ static int bmp280_init(const struct device *dev)
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
 
-	if (!device_is_ready(conf->i2c_bus.bus))
+	if (!conf->ioAPI.methods.isBusReady(dev))
 	{
-		printk("I2C err\n");
+		printk("bus err\n");
 		return -ENODEV;
 	}
 	if (!bmp280_chipID_OK(dev))
@@ -153,7 +155,7 @@ static int bmp280_init(const struct device *dev)
 	printk("waited for boot %dm sec\n", c);
 
 	uint8_t calBuf[26];
-	c = i2c_burst_read_dt(&(conf->i2c_bus), BMP280_ADDR_CALIB00, calBuf, 26);
+	c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_CALIB00, calBuf, 26);
 	printk("read Calib %d\n", c);
 
 	data->calib.tCalib.dT1 = (calBuf[1] << 8) | calBuf[0];
@@ -275,14 +277,14 @@ static int bmp280_setCtrlMeas(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 	const struct bmp280_data *data = dev->data;
-	return i2c_reg_write_byte_dt(&(conf->i2c_bus), BMP280_ADDR_CTRL_MEAS, data->ctrl_meas);
+	return conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_CTRL_MEAS, data->ctrl_meas);
 }
 
 static int bmp280_getCtrlMeas(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
-	return i2c_reg_read_byte_dt(&(conf->i2c_bus), BMP280_ADDR_CTRL_MEAS, &data->ctrl_meas);
+	return conf->ioAPI.methods.readByte(dev, BMP280_ADDR_CTRL_MEAS, &data->ctrl_meas);
 }
 
 static int bmp280_getPressureRaw(const struct device *dev)
@@ -291,7 +293,7 @@ static int bmp280_getPressureRaw(const struct device *dev)
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
 
-	int c = i2c_burst_read_dt(&(conf->i2c_bus), BMP280_ADDR_PRESS_MSB, data->press_raw, 3);
+	int c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_PRESS_MSB, data->press_raw, 3);
 	printk("P_c = %d\n", c);
 
 	if (c == 0)
@@ -309,7 +311,7 @@ static int bmp280_getTemperatureRaw(const struct device *dev)
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
 
-	int c = i2c_burst_read_dt(&(conf->i2c_bus), BMP280_ADDR_TEMP_MSB, data->temp_raw, 3);
+	int c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_TEMP_MSB, data->temp_raw, 3);
 	printk("T_c = %d\n", c);
 	if (c == 0)
 	{
@@ -383,7 +385,7 @@ static bool bmp280_isImReady(const struct device *dev)
 {
 	const struct bmp280_config *config = dev->config;
 	uint8_t status = 0;
-	i2c_reg_read_byte_dt(&(config->i2c_bus), BMP280_ADDR_STATUS, &status);
+	config->ioAPI.methods.readByte(dev, BMP280_ADDR_STATUS, &status);
 	return !(status & BMP280_MASK_STATUS_IM_UPADTE);
 }
 
@@ -391,14 +393,14 @@ static bool bmp280_isMeasuring(const struct device *dev)
 {
 	const struct bmp280_config *config = dev->config;
 	uint8_t status = 0;
-	i2c_reg_read_byte_dt(&(config->i2c_bus), BMP280_ADDR_STATUS, &status);
+	config->ioAPI.methods.readByte(dev, BMP280_ADDR_STATUS, &status);
 	return (status & BMP280_MASK_STATUS_MEASURING) >> 3;
 }
 static bool bmp280_chipID_OK(const struct device *dev)
 {
 	uint8_t id;
 	const struct bmp280_config *conf = dev->config;
-	int c = i2c_reg_read_byte_dt(&(conf->i2c_bus), BMP280_ADDR_ID, &id);
+	int c = conf->ioAPI.methods.readByte(dev, BMP280_ADDR_ID, &id);
 	if (id != BMP280_SENSOR_ID || c)
 	{
 		return 0;
@@ -409,12 +411,12 @@ static int bmp280_softReset(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 
-	if (!device_is_ready(conf->i2c_bus.bus))
+	if (!conf->ioAPI.methods.isBusReady(dev))
 	{
 		printk("I2C err\n");
 		return -ENODEV;
 	}
-	int c = i2c_reg_write_byte_dt(&(conf->i2c_bus), BMP280_ADDR_RESET, BMP280_RESET);
+	int c = conf->ioAPI.methods.writeByte(&(conf->i2c_bus), BMP280_ADDR_RESET, BMP280_RESET);
 	if (c)
 		return c;
 	return bmp280_init(dev);
@@ -475,6 +477,49 @@ static uint16_t bmp280_timeToRead_ms(const struct device *dev)
 }
 
 /*
+ *	 bmp280 IO API I2C
+ */
+
+static int bmp280_i2c_readBurst(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+{
+	const struct bmp280_config *conf = dev->config;
+
+	return i2c_burst_read_dt(&(conf->ioAPI.bus.i2c), addr, buffer, size);
+}
+
+static int bmp280_i2c_writeBurst(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+{
+	const struct bmp280_config *conf = dev->config;
+	return i2c_burst_write_dt(&(conf->ioAPI.bus.i2c), addr, buffer, size);
+}
+
+static int bmp280_i2c_readByte(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size)
+{
+	const struct bmp280_config *conf = dev->config;
+
+	return i2c_reg_read_byte_dt(&(conf->ioAPI.bus.i2c), addr, buffer);
+}
+
+static int bmp280_i2c_writeByte(const struct device *dev, uint8_t addr, uint8_t buffer)
+{
+	const struct bmp280_config *conf = dev->config;
+	return i2c_reg_write_byte_dt(&(conf->ioAPI.bus.i2c), addr, buffer);
+}
+
+static inline bool bmp280_i2c_isBusReady(const struct device *dev)
+{
+	return device_is_ready(((struct bmp280_config *) dev->config)->ioAPI.bus.i2c.bus);
+}
+
+const struct bmp280_ioMethods bmp280_i2c_ioMethods = {
+	.readBurst = bmp280_i2c_readBurst,
+	.writeBurst = bmp280_i2c_writeBurst,
+	.readByte = bmp280_i2c_readByte,
+	.writeByte = bmp280_i2c_writeByte,
+	.isBusReady = bmp280_i2c_isBusReady,
+};
+
+/*
  *	Zephyr sensor API integration
  */
 
@@ -492,7 +537,12 @@ const struct sensor_driver_api bmp280_api = {
 	static struct bmp280_data bmp280_data_##inst = {                       \
 		/* initialize RAM values as needed, e.g.: */                       \
 	};                                                                     \
+	static const struct bmp280_ioAPI bmp280_IOapi_##inst = {               \
+		.bus.i2c = I2C_DT_SPEC_INST_GET(inst),                             \
+		.methods = bmp280_i2c_ioMethods,                                   \
+	};                                                                     \
 	static const struct bmp280_config bmp280_config_##inst = {             \
+		.ioAPI = bmp280_IOapi_##inst,                                      \
 		.i2c_bus = I2C_DT_SPEC_INST_GET(inst),                             \
 	};                                                                     \
 	SENSOR_DEVICE_DT_INST_DEFINE(inst,                                     \
