@@ -1,0 +1,8 @@
+# Copyright (c) 2026 Franciszek Trzeciak
+# SPDX-License-Identifier: Apache-2.0
+description: BMP280 pressure and temperature sensor - I2C specific
+compatible: "custom,bmp280"
+on-bus: i2c
+include: 
+  - custom,bmp280-common.yaml
+  - i2c-device.yaml

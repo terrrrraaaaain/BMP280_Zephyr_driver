@@ -20,16 +20,6 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/spi.h>
 #include "bmp280_priv.h"
-/*
-chanels
-	SENSOR_CHAN_AMBIENT_TEMP
-	SENSOR_CHAN_PRESS
-*/
-
-/*
-atributes
-	SENSOR_ATTR_SAMPLING_FREQUENCY,
-*/
 
 /*
  *	Definitions
@@ -70,6 +60,7 @@ struct bmp280_ioMethods
 	int (*readBurst)(const struct device *dev, uint8_t addr, uint8_t *buffer, size_t size);
 	int (*writeByte)(const struct device *dev, uint8_t addr, uint8_t buffer);
 	int (*writeBurst)(const struct device *dev, uint8_t addr, const uint8_t *buffer, size_t size);
+	bool (*busType)(void); // 1 for I2C, 0 for SPI
 };
 
 struct bmp280_ioAPI
@@ -82,10 +73,21 @@ struct bmp280_ioAPI
 	} bus;
 };
 
+struct bmp280_DT_params
+{
+	uint8_t mode;
+	uint8_t t_stby;
+	uint8_t iir_filter;
+	uint8_t ovrsmplT;
+	uint8_t ovrsmplP;
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+	bool spi3wire;
+#endif
+};
 struct bmp280_config
 {
-	struct i2c_dt_spec i2c_bus;
 	struct bmp280_ioAPI ioAPI;
+	struct bmp280_DT_params DTparams;
 };
 
 struct bmp280_data
@@ -112,6 +114,10 @@ static int bmp280_getTemperatureRaw(const struct device *dev);
 static int bmp280_getCtrlMeas(const struct device *dev);
 static int bmp280_setCtrlMeas(const struct device *dev);
 
+// getters and setters of configs
+static int bmp280_getConfig(const struct device *dev, uint8_t *configs);
+static int bmp280_setConfig(const struct device *dev, uint8_t t_stby, uint8_t mask);
+
 // Compensation and conversion function adapted from Bosh BMP280 datasheet
 static int calibTemp(const struct device *dev, struct sensor_value *temperature);
 static int calibPress(const struct device *dev, struct sensor_value *pressure);
@@ -122,19 +128,24 @@ static uint16_t bmp280_timeToRead_ms(const struct device *dev);
 // Software reset
 static int bmp280_softReset(const struct device *dev);
 
+// struct comparsion
+static bool sensor_value_equal(const struct sensor_value *v1, const struct sensor_value *v2);
+static bool int_sensor_value_equal(const struct sensor_value *v1, const int val1, const int val2);
+
+// attribute (struct sensor_value) to bmp280 regs converter
+static inline int bmp280_attrValToReg(const struct bmp280_param_reg_elem *map, size_t s, const struct sensor_value *attr, uint8_t *reg);
+
 /*
  *	Implementations of main API functions
  */
 
 static int bmp280_init(const struct device *dev)
 {
-	printk("Initializing BMP280_Ft\n");
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
 
 	if (!conf->ioAPI.methods.isBusReady(dev))
 	{
-		printk("bus err\n");
 		return -ENODEV;
 	}
 	if (!bmp280_chipID_OK(dev))
@@ -152,12 +163,9 @@ static int bmp280_init(const struct device *dev)
 		k_msleep(1);
 		c++;
 	}
-	printk("waited for boot %dm sec\n", c);
 
 	uint8_t calBuf[26];
 	c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_CALIB00, calBuf, 26);
-	printk("read Calib %d\n", c);
-
 	data->calib.tCalib.dT1 = (calBuf[1] << 8) | calBuf[0];
 	data->calib.tCalib.dT2 = (calBuf[3] << 8) | calBuf[2];
 	data->calib.tCalib.dT3 = (calBuf[5] << 8) | calBuf[4];
@@ -171,48 +179,79 @@ static int bmp280_init(const struct device *dev)
 	data->calib.pCalib.dP8 = (calBuf[21] << 8) | calBuf[22];
 	data->calib.pCalib.dP9 = (calBuf[23] << 8) | calBuf[24];
 
-	printk("%d\n", data->calib.tCalib.dT1);
-	printk("%d\n", data->calib.tCalib.dT2);
-	printk("%d\n", data->calib.tCalib.dT3);
-	printk("%d\n", data->calib.pCalib.dP1);
-	printk("%d\n", data->calib.pCalib.dP2);
-	printk("%d\n", data->calib.pCalib.dP3);
-	printk("%d\n", data->calib.pCalib.dP4);
-	printk("%d\n", data->calib.pCalib.dP5);
-	printk("%d\n", data->calib.pCalib.dP6);
-	printk("%d\n", data->calib.pCalib.dP7);
-	printk("%d\n", data->calib.pCalib.dP8);
-	printk("%d\n", data->calib.pCalib.dP9);
-
 	data->calib.t_cooef_cmpt = 0; // reset temp calibration info readiness flag for pressure calibration
 
-	data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, BMP280_MODE_FORCED);
-	data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_T(data->ctrl_meas, BMP280_OVERSAMPLING_TEMPERATURE_X_16);
-	data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_P(data->ctrl_meas, BMP280_OVERSAMPLING_PRESSURE_X_16);
+	// DT configuration
+	if (conf->DTparams.mode >= 0 && conf->DTparams.mode <= BMP280_MODE_CNT)
+		data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, mode_map[conf->DTparams.mode].reg);
+	else
+		return -EINVAL;
+
+	if (conf->DTparams.ovrsmplT >= 0 && conf->DTparams.mode <= BMP280_OVERSAMPLING_CNT)
+		data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_T(data->ctrl_meas, ovrsm_t_map[conf->DTparams.ovrsmplT].reg);
+	else
+		return -EINVAL;
+
+	if (conf->DTparams.ovrsmplP >= 0 && conf->DTparams.mode <= BMP280_OVERSAMPLING_CNT)
+		data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_P(data->ctrl_meas, ovrsm_p_map[conf->DTparams.ovrsmplP].reg);
+	else
+		return -EINVAL;
+
+	uint8_t config = 0;
+	if (conf->DTparams.t_stby >= 0 && conf->DTparams.t_stby <= BMP280_T_STANDBY_CNT)
+		config = BMP280_CONFIG_SET_T_STANDBY(config, standby_t_map[conf->DTparams.t_stby].reg);
+	else
+		return -EINVAL;
+
+	if (conf->DTparams.iir_filter >= 0 && conf->DTparams.iir_filter <= BMP280_FILTER_CNT)
+		config = BMP280_CONFIG_SET_FILTER(config, filter_map[conf->DTparams.iir_filter].reg);
+	else
+		return -EINVAL;
+	if (conf->DTparams.iir_filter >= 0 && conf->DTparams.iir_filter <= BMP280_FILTER_CNT)
+		config = BMP280_CONFIG_SET_FILTER(config, filter_map[conf->DTparams.iir_filter].reg);
+	else
+		return -EINVAL;
+
+#if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
+	if (!conf->ioAPI.methods.busType()) // check if we use SPI
+		if (conf->DTparams.spi3wire = 1)
+			config = BMP280_CONFIG_SET_SPI_3_WIRE(config, BMP280_CONFIG_SPI_3_WIRE_ON);
+		else if (conf->DTparams.spi3wire = 0)
+			config = BMP280_CONFIG_SET_SPI_3_WIRE(config, BMP280_CONFIG_SPI_3_WIRE_OFF);
+		else
+			return -EINVAL;
+#endif
+
+	c = bmp280_setConfig(dev, config, BMP280_MASK_CONFIG_FILTER | BMP280_MASK_CONFIG_T_STANDBY | BMP280_MASK_CONFIG_SPI_3_WIRE);
+	if (c)
+		return c;
 
 	c = bmp280_setCtrlMeas(dev);
-	c = bmp280_getCtrlMeas(dev);
+	if (c)
+		return c;
 
-	printk("CTRL(%d) %d\n", c, (data->ctrl_meas));
+	bmp280_getCtrlMeas(dev);
+	bmp280_getConfig(dev, &config);
 	return 0;
 }
 
-static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel chanel)
+static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel channel)
 {
 	struct bmp280_data *data = dev->data;
+	uint8_t cycles = 0;
+
 	if (!bmp280_chipID_OK(dev))
 	{
 		return -ENXIO;
 	}
-	if (BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_FORCED || BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_SLEEP)
+	bmp280_getCtrlMeas(dev);
+	if (BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_SLEEP_C)
 	{
 
-		data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, BMP280_MODE_FORCED); // assuming that the aim of caling fetch in sleep mode is to triger a single measure
-		bmp280_setCtrlMeas(dev);														  // start measuring in forced mode (if in sleep wake up and force measurement)
+		data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, BMP280_MODE_FORCED_C); // assuming that the aim of caling fetch in sleep mode is to triger a single measure
+		bmp280_setCtrlMeas(dev);															// start measuring in forced mode (if in sleep wake up and force measurement)
 
 		k_msleep(bmp280_timeToRead_ms(dev)); // wait for result based on configuration
-		printk("wait %dms\n", bmp280_timeToRead_ms(dev));
-		uint8_t cycles = 0;
 		while (bmp280_isMeasuring(dev) || !bmp280_isImReady(dev))
 		{
 			if (cycles >= 500)
@@ -220,10 +259,21 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 			k_usleep(100);
 		}
 	}
+	else
+	{
+		if (BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_FORCED_C) // already started measurment
+		{
+			while (bmp280_isMeasuring(dev) || !bmp280_isImReady(dev))
+			{
+				if (cycles >= 400)
+					return -ETIMEDOUT;
+				k_usleep(200);
+			}
+		}
+	}
 	int c = bmp280_getCtrlMeas(dev);
-	printk("CTRL(%d) %d\n", c, (((struct bmp280_data *)dev->data)->ctrl_meas));
 	data->calib.t_cooef_cmpt = 0;
-	switch (chanel)
+	switch (channel)
 	{
 	case SENSOR_CHAN_AMBIENT_TEMP:
 		return bmp280_getTemperatureRaw(dev);
@@ -246,12 +296,11 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 	return 0;
 }
 
-static int bmp280_chanel_get(const struct device *dev, enum sensor_channel chanel, struct sensor_value *reading)
+static int bmp280_chanel_get(const struct device *dev, enum sensor_channel channel, struct sensor_value *reading)
 {
-	switch (chanel)
+	switch (channel)
 	{
 	case SENSOR_CHAN_AMBIENT_TEMP:
-		printk("temp raw = %d\n", ((struct bmp280_data *)(dev->data))->temp_raw[0]);
 		calibTemp(dev, reading);
 		break;
 	case SENSOR_CHAN_PRESS:
@@ -269,6 +318,112 @@ static int bmp280_chanel_get(const struct device *dev, enum sensor_channel chane
 	return 0;
 }
 
+static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel, enum sensor_attribute attr, const struct sensor_value *val)
+{
+	// const struct bmp280_config *conf = dev->config;
+	struct bmp280_data *data = dev->data;
+	uint8_t reg;
+	int ret = 0;
+	switch ((int)attr)
+	{
+	case SENSOR_ATTR_OVERSAMPLING:
+		switch (channel)
+		{
+		case SENSOR_CHAN_AMBIENT_TEMP:
+			ret = bmp280_attrValToReg(ovrsm_t_map, BMP280_OVERSAMPLING_CNT, val, &reg);
+			if (ret)
+				return ret;
+			data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_T(data->ctrl_meas, reg);
+			break;
+		case SENSOR_CHAN_PRESS:
+			ret = bmp280_attrValToReg(ovrsm_p_map, BMP280_OVERSAMPLING_CNT, val, &reg);
+			if (ret)
+				return ret;
+			data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_P(data->ctrl_meas, reg);
+			break;
+		case SENSOR_CHAN_ALL:
+			ret = bmp280_attrValToReg(ovrsm_p_map, BMP280_OVERSAMPLING_CNT, val, &reg);
+			if (ret)
+				return ret;
+			data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_P(data->ctrl_meas, reg);
+
+			ret = bmp280_attrValToReg(ovrsm_t_map, BMP280_OVERSAMPLING_CNT, val, &reg);
+			if (ret)
+				return ret;
+			data->ctrl_meas = BMP280_CTRL_MEAS_SET_OSRS_T(data->ctrl_meas, reg);
+			break;
+		default:
+			return -ENOTSUP;
+		}
+		return bmp280_setCtrlMeas(dev);
+
+	case BMP280_ATTR_T_STANDBY:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			ret = bmp280_attrValToReg(standby_t_map, BMP280_T_STANDBY_CNT, val, &reg);
+			if (ret)
+				return ret;
+
+			return bmp280_setConfig(dev, reg, BMP280_MASK_CONFIG_T_STANDBY);
+		}
+		else
+			return -ENOTSUP;
+
+	case BMP280_ATTR_FILTER:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			ret = bmp280_attrValToReg(filter_map, BMP280_FILTER_CNT, val, &reg);
+			if (ret)
+				return ret;
+
+			return bmp280_setConfig(dev, reg, BMP280_MASK_CONFIG_FILTER);
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_3_WIRE_SPI:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+
+			if (int_sensor_value_equal(val, 1, 0))
+			{
+				reg = BMP280_CONFIG_SPI_3_WIRE_ON;
+			}
+			else
+			{
+				reg = BMP280_CONFIG_SPI_3_WIRE_OFF;
+			}
+			return bmp280_setConfig(dev, reg, BMP280_MASK_CONFIG_SPI_3_WIRE);
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_RESET:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+
+			if (int_sensor_value_equal(val, 1, 0))
+			{
+				return bmp280_softReset(dev);
+			}
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_MODE:
+		ret = bmp280_attrValToReg(mode_map, BMP280_MODE_CNT, val, &reg);
+		if (ret)
+			return ret;
+		data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, reg);
+		return bmp280_setCtrlMeas(dev);
+		break;
+	default:
+		return -ENOTSUP;
+	}
+	return 0;
+}
+
+static int bmp280_attr_get(const struct device *dev, enum sensor_channel channel, enum sensor_attribute attr, struct sensor_value *val)
+{
+	return -ENOTSUP;
+}
 /*
  *	Implementations of helper functions
  */
@@ -287,6 +442,23 @@ static int bmp280_getCtrlMeas(const struct device *dev)
 	return conf->ioAPI.methods.readByte(dev, BMP280_ADDR_CTRL_MEAS, &data->ctrl_meas);
 }
 
+static int bmp280_setConfig(const struct device *dev, uint8_t configs, uint8_t mask)
+{
+	const struct bmp280_config *conf = dev->config;
+	uint8_t configs_c;
+	int c = bmp280_getConfig(dev, &configs_c);
+	if (c)
+		return c;
+	configs = (configs_c & (BMP280_MASK_CONFIG_RESERVED | ~mask)) | (configs & mask);
+	return conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_CONFIG, configs);
+}
+
+static int bmp280_getConfig(const struct device *dev, uint8_t *configs)
+{
+	const struct bmp280_config *conf = dev->config;
+	return conf->ioAPI.methods.readByte(dev, BMP280_ADDR_CONFIG, configs);
+}
+
 static int bmp280_getPressureRaw(const struct device *dev)
 {
 
@@ -294,7 +466,6 @@ static int bmp280_getPressureRaw(const struct device *dev)
 	struct bmp280_data *data = dev->data;
 
 	int c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_PRESS_MSB, data->press_raw, 3);
-	printk("P_c = %d\n", c);
 
 	if (c == 0)
 	{
@@ -312,7 +483,7 @@ static int bmp280_getTemperatureRaw(const struct device *dev)
 	struct bmp280_data *data = dev->data;
 
 	int c = conf->ioAPI.methods.readBurst(dev, BMP280_ADDR_TEMP_MSB, data->temp_raw, 3);
-	printk("T_c = %d\n", c);
+
 	if (c == 0)
 	{
 		if (data->temp_raw[0] == BMP280_NO_VALUE_1 && BMP280_CTRL_MEAS_GET_OSRS_T(data->ctrl_meas) != BMP280_OVERSAMPLING_TEMPERATURE_X_0)
@@ -330,7 +501,7 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 
 	if (!data->calib.t_cooef_cmpt)
 	{
-		printk("temp calib full\n");
+
 		int32_t tRaw = data->temp_raw[0] << 12 | data->temp_raw[1] << 4 | data->temp_raw[2] >> 4;
 
 		int32_t v1 = ((((tRaw >> 3) - ((int32_t)data->calib.tCalib.dT1 << 1))) *
@@ -344,7 +515,7 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 		data->calib.t = v1 + v2;
 		data->calib.t_cooef_cmpt = 1;
 	}
-	printk("temp calib min\n");
+
 
 	uint32_t tempT = (data->calib.t * 5 + 128) >> 8;
 	temperature->val1 = tempT / 100;
@@ -356,7 +527,6 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 // Adapted from Bosh BMP280 datasheet
 static int calibPress(const struct device *dev, struct sensor_value *pressure)
 {
-	printk("press calib\n");
 
 	struct bmp280_data *data = dev->data;
 	int64_t v1 = ((int64_t)data->calib.t) - 128000;
@@ -413,10 +583,9 @@ static int bmp280_softReset(const struct device *dev)
 
 	if (!conf->ioAPI.methods.isBusReady(dev))
 	{
-		printk("I2C err\n");
 		return -ENODEV;
 	}
-	int c = conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_RESET, BMP280_RESET);
+	int c = conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_RESET, BMP280_RESET_VAL);
 	if (c)
 		return c;
 	return bmp280_init(dev);
@@ -476,6 +645,29 @@ static uint16_t bmp280_timeToRead_ms(const struct device *dev)
 	return t;
 }
 
+static inline bool sensor_value_equal(const struct sensor_value *v1, const struct sensor_value *v2)
+{
+	return (v1->val1 == v2->val1) && (v1->val2 == v2->val2);
+}
+static inline bool int_sensor_value_equal(const struct sensor_value *v1, const int val1, const int val2)
+{
+	return (v1->val1 == val1) && (v1->val2 == val2);
+}
+
+static inline int bmp280_attrValToReg(const struct bmp280_param_reg_elem *map, size_t s, const struct sensor_value *attr, uint8_t *reg)
+{
+	for (size_t i = 0; i < s; i++)
+	{
+		if (sensor_value_equal(&map[i].val, attr))
+		{
+			*reg = map[i].reg;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
 /*
  *	 bmp280 IO API I2C
  */
@@ -510,6 +702,10 @@ static inline bool bmp280_i2c_isBusReady(const struct device *dev)
 {
 	return device_is_ready(((struct bmp280_config *)dev->config)->ioAPI.bus.i2c.bus);
 }
+static inline bool bmp280_i2c_busType(void) // 1 for I2C, 0 for SPI
+{
+	return 1;
+}
 
 const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 	.readBurst = bmp280_i2c_readBurst,
@@ -517,8 +713,13 @@ const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 	.readByte = bmp280_i2c_readByte,
 	.writeByte = bmp280_i2c_writeByte,
 	.isBusReady = bmp280_i2c_isBusReady,
+	.busType = bmp280_i2c_busType,
 };
 #endif
+
+/*
+ *	 bmp280 IO API SPI - to implement
+ */
 
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
 
@@ -551,6 +752,10 @@ static inline bool bmp280_spic_isBusReady(const struct device *dev)
 {
 	return -ENOTSUP
 }
+static inline bool bmp280_spi_busType(void) // 1 for I2C, 0 for SPI
+{
+	return 0;
+}
 
 const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 	.readBurst = bmp280_spi_readBurst,
@@ -558,6 +763,7 @@ const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 	.readByte = bmp280_spi_readByte,
 	.writeByte = bmp280_spi_writeByte,
 	.isBusReady = bmp280_spi_isBusReady,
+	.busType = bmp280_spi_busType,
 };
 #endif
 
@@ -566,38 +772,46 @@ const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
  */
 
 const struct sensor_driver_api bmp280_api = {
-	.attr_set = NULL,
-	.attr_get = NULL,
-	.trigger_set = NULL,
+	.attr_set = bmp280_attr_set,
+	.attr_get = bmp280_attr_get,
 	.sample_fetch = bmp280_sample_fetch,
-	.channel_get = bmp280_chanel_get,
-	.get_decoder = NULL,
-	.submit = NULL,
-};
+	.channel_get = bmp280_chanel_get};
 #define BMP280_ON_I2C_DEF(inst) {.i2c = I2C_DT_SPEC_INST_GET(inst)}
 #define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
 
-#define BMP280_DEF(inst)                                                   \
-	static struct bmp280_data bmp280_data_##inst = {                       \
-		/* initialize RAM values as needed, e.g.: */                       \
-	};                                                                     \
-	static const struct bmp280_config bmp280_config_##inst = {             \
-		.ioAPI = {                                                         \
-			.bus = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),                  \
-							   (BMP280_ON_I2C_DEF(inst)),                  \
-							   (BMP280_ON_SPI_DEF(inst))),                 \
-                                                                           \
-			.methods = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),              \
-								   (bmp280_i2c_ioMethods_set),             \
-								   (bmp280_spi_ioMethods_set)),            \
-		},                                                                 \
-	};                                                                     \
-	SENSOR_DEVICE_DT_INST_DEFINE(inst,                                     \
-								 bmp280_init,                              \
-								 NULL,                                     \
-								 &bmp280_data_##inst,                      \
-								 &bmp280_config_##inst,                    \
-								 POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY, \
+/* clang-format off */
+#define BMP280_DEF(inst)                                                                             \
+	static struct bmp280_data bmp280_data_##inst = {                                                 \
+		/* initialize RAM values as needed, e.g.: */                                                 \
+	};                                                                                               \
+	static const struct bmp280_config bmp280_config_##inst = {                                       \
+		.ioAPI = {                                                                                   \
+			.bus = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),                                            \
+							   (BMP280_ON_I2C_DEF(inst)),                                            \
+							   (BMP280_ON_SPI_DEF(inst))),                                           \
+                                                                                                     \
+			.methods = COND_CODE_1(DT_INST_ON_BUS(inst, i2c),                                        \
+								   (bmp280_i2c_ioMethods_set),                                       \
+								   (bmp280_spi_ioMethods_set)),                                      \
+		},                                                                                           \
+		.DTparams = {                                                                                \
+			.mode = DT_INST_PROP_OR(inst, mode, BMP280_DEFAULT_MODE_IDX),                            \
+			.t_stby = DT_INST_PROP_OR(inst, t_standby, BMP280_DEFAULT_T_STBY_IDX),                   \
+			.ovrsmplT = DT_INST_PROP_OR(inst, temperature_oversampling, BMP280_DEFAULT_OVRSMPL_IDX), \
+			.ovrsmplP = DT_INST_PROP_OR(inst, pressure_oversampling, BMP280_DEFAULT_OVRSMPL_IDX),    \
+			.iir_filter = DT_INST_PROP_OR(inst, iir_filter, BMP280_DEFAULT_FILTER_IDX),              \
+			IF_ENABLED(DT_INST_ON_BUS(inst,spi),(													 \
+				.spi3wire = DT_INST_PROP_OR(inst, spi_3_wire_enable, BMP280_DEFAULT_SPI_3_WIRE_IDX),)\
+			)     																					 \
+		},                                                                                           \
+	};                                                                                               \
+	SENSOR_DEVICE_DT_INST_DEFINE(inst,                                                               \
+								 bmp280_init,                                                        \
+								 NULL,                                                               \
+								 &bmp280_data_##inst,                                                \
+								 &bmp280_config_##inst,                                              \
+								 POST_KERNEL, CONFIG_SENSOR_INIT_PRIORITY,                           \
 								 &bmp280_api);
 
 DT_INST_FOREACH_STATUS_OKAY(BMP280_DEF)
+/* clang-format on */
