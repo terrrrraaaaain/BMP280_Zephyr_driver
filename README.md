@@ -72,8 +72,10 @@ Compatible with Zephyr RTOS
     }
 ```
 ## Further Development
-    - [ ] SPI communication
-    - [ ] Read and Decode API
+- [ ] SPI communication
+- [ ] Read and Decode API
 
+### Licence
+Released under Apache-2.0 licence
 ### Author
 Franciszek Trzeciak
