@@ -8,7 +8,7 @@
  * @file custom_bmp280.h
  * @brief BMP280 Driver config Constants for runtime use
  * @author Franciszek Trzeciak
- * @date 2026-04-22
+ * @date 2026-04-20
  */
 #include <zephyr/drivers/sensor.h>
 

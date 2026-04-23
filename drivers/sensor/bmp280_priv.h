@@ -9,7 +9,7 @@
  *   @brief Memory addresss map, default values and configs
  *   for BMP280 sensor according to datasheet
  *   @author Franciszek Trzeciak
- *   @date 2026-04-22
+ *   @date 2026-04-16
  */
 
 #include "zephyr/drivers/sensor/custom_bmp280.h"
@@ -180,16 +180,29 @@
  *
  */
 
+
+/**
+ * @name SPI helper macros
+ * @{
+ */
+#define BMP280_ON_I2C_DEF(inst) {.i2c = I2C_DT_SPEC_INST_GET(inst)}
+#define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
+/**
+ * @}
+ * 
+ */
 /**
  * @name Users constants to registers mapping
  * @brief Allows conversion between users constatnts to values writen to BMP280 registers
  * @{
  */
-// Struct for mapping attribute's values to registers
+/**
+ * @brief Structure for mapping attribute's values to registers
+ * */
 struct bmp280_param_reg_elem
 {
     struct sensor_value val; /**< User constatnt */
-    uint8_t reg;             /**< Raw data  */
+    uint8_t reg;             /**< Raw data for registers*/
 };
 
 #define BMP280_MODE_CNT 3

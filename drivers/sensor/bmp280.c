@@ -13,6 +13,7 @@
  *   @brief Implemenatation of the BMP280 sensor driver for Zepyhr RTOS
  * 		This driver inculdes I2C communication, runtime sensor configuration
  * 		and compensation methods described in datasheet
+ *   @date 2026-04-16
  */
 
 #define DT_DRV_COMPAT custom_bmp280
@@ -25,8 +26,10 @@
 /*
  *	Definitions
  */
+
 /**
- * @brief
+ * @brief Temperature calibration coefficients
+ *
  */
 struct bmp280_calibTemperatureData
 {
@@ -35,6 +38,10 @@ struct bmp280_calibTemperatureData
 	int16_t dT3;
 };
 
+/**
+ * @brief Pressure calibration coefficients
+ *
+ */
 struct bmp280_calibPressureData
 {
 	uint16_t dP1;
@@ -48,14 +55,22 @@ struct bmp280_calibPressureData
 	int16_t dP9;
 };
 
+/**
+ * @brief Calibration data for temperature and pressure, temperature cooefficient for pressure compensation, and flag whether temperature cooeficient has been updated on new data
+ *
+ */
 struct bmp280_calibData
 {
 	struct bmp280_calibTemperatureData tCalib;
 	struct bmp280_calibPressureData pCalib;
-	int32_t t; // for pressure compensation from temperatur compensation
+	int32_t t; /** for pressure compensation from temperature compensation*/
 	bool t_cooef_cmpt;
 };
 
+/**
+ * @brief Set of Bus specific IO methods
+ *
+ */
 struct bmp280_ioMethods
 {
 	bool (*isBusReady)(const struct device *dev);
@@ -66,9 +81,16 @@ struct bmp280_ioMethods
 	bool (*busType)(void); // 1 for I2C, 0 for SPI
 };
 
+/**
+ * @brief IO abstraction layer and bus structure
+ *
+ */
 struct bmp280_ioAPI
 {
 	struct bmp280_ioMethods methods;
+	/**
+	 * @brief bus union for IO abstraction layer
+	 */
 	union bmp280_bus
 	{
 		struct i2c_dt_spec i2c;
@@ -76,6 +98,10 @@ struct bmp280_ioAPI
 	} bus;
 };
 
+/**
+ * @brief Device Tree initial data
+ *
+ */
 struct bmp280_DT_params
 {
 	uint8_t mode;
@@ -87,12 +113,21 @@ struct bmp280_DT_params
 	bool spi3wire;
 #endif
 };
+
+/**
+ * @brief Main driver configuration structure
+ *
+ */
 struct bmp280_config
 {
 	struct bmp280_ioAPI ioAPI;
 	struct bmp280_DT_params DTparams;
 };
 
+/**
+ * @brief Main driver configuration structure
+ *
+ */
 struct bmp280_data
 {
 	uint8_t press_raw[3];
@@ -483,7 +518,6 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 	}
 	return 0;
 }
-// TODO: implement
 /**
  * @brief Get sensor attribute or current configuration
  *
@@ -932,17 +966,20 @@ const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 };
 #endif
 
-/*
- *	Zephyr sensor API integration
+/**
+ *	@name Zephyr sensor API integration
+ * 	@{
  */
 
+/**
+ * @brief sensor API methods
+ *
+ */
 const struct sensor_driver_api bmp280_api = {
 	.attr_set = bmp280_attr_set,
 	.attr_get = bmp280_attr_get,
 	.sample_fetch = bmp280_sample_fetch,
 	.channel_get = bmp280_channel_get};
-#define BMP280_ON_I2C_DEF(inst) {.i2c = I2C_DT_SPEC_INST_GET(inst)}
-#define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
 
 /* clang-format off */
 #define BMP280_DEF(inst)                                                                             \
@@ -980,3 +1017,7 @@ const struct sensor_driver_api bmp280_api = {
 
 DT_INST_FOREACH_STATUS_OKAY(BMP280_DEF)
 /* clang-format on */
+
+/**
+ * @}
+ */
