@@ -975,7 +975,7 @@ const struct bmp280_ioMethods bmp280_i2c_ioMethods_set = {
 #endif
 
 /*
- *	 bmp280 IO API SPI - to implement
+ *	 bmp280 IO API SPI
  */
 
 #if DT_ANY_INST_ON_BUS_STATUS_OKAY(spi)
