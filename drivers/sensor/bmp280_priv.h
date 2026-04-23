@@ -6,45 +6,74 @@
 
 /**
  *   @file
- *   @brief Memory address map, default values and configs
+ *   @brief Memory addresss map, default values and configs
  *   for BMP280 sensor according to datasheet
+ *   @author Franciszek Trzeciak
+ *   @date 2026-04-22
  */
 
 #include "zephyr/drivers/sensor/custom_bmp280.h"
 
 #ifndef BMP280_PRIV_H
 #define BNMP280_PRIV_H
-// Chip id number mem addr
+/**
+ * @name Register map
+ * @brief BMP280 Register map
+ * @{
+ */
+
+/** @brief Chip id number memory address. Should be 0x56 */
 #define BMP280_ADDR_ID 0xD0
 
-// Pressure mem addrs
+/**
+ * @name Pressure memory addressses.
+ * @brief Pressure memory addressses.
+ * @{
+ */
 #define BMP280_ADDR_PRESS_MSB 0xF7
 #define BMP280_ADDR_PRESS_LSB 0xF8
 #define BMP280_ADDR_PRESS_XLSB 0xF9
+/**
+ * @}
+ */
 
-// Temperature mem addrs
+/**
+ * @name Temperature memory addressses.
+ * @brief Temperature memory addressses.
+ * @{
+ */
 #define BMP280_ADDR_TEMP_MSB 0xFA
 #define BMP280_ADDR_TEMP_LSB 0xFB
 #define BMP280_ADDR_TEMP_XLSB 0xFC
+/**
+ * @}
+ */
 
-// Reset mem addrs
+/** @brief Software BMP280 reset memory addressses. Write 0xB6 to reset sensor*/
 #define BMP280_ADDR_RESET 0xE0
 
-// Configs and status mem addrs
+/** @brief Configs, status and Measurement Control memory addressses*/
 #define BMP280_ADDR_CONFIG 0XF5
 #define BMP280_ADDR_CTRL_MEAS 0XF4
 #define BMP280_ADDR_STATUS 0XF3
 
-// Calibration data mem addrs
+/** @brief Calibrations constatnts memory address*/
 #define BMP280_ADDR_CALIB00 0x88
+/**
+ * @}
+ */
 
-// Predefined vals
+/** @brief Expected Sensor ID value*/
 #define BMP280_SENSOR_ID 0x58
+/** @brief  Value for soft reseting BMP280*/
 #define BMP280_RESET_VAL 0xB6
+/** @brief  Value read from BMP280_ADDR_PRESS_MSB or BMP280_ADDR_TEMP_MSB when measuring is off*/
 #define BMP280_NO_VALUE_1 0x80
 
-/*
- *   MEASUREMENT CONTROL (CTRL_MEAS)
+/**
+ * @name MEASUREMENT CONTROL (CTRL_MEAS)
+ * @brief measuremnt control byte predefined values, masks and setting/getting macros
+ * @{
  */
 
 // BMP280 working modes
@@ -83,11 +112,16 @@
 #define BMP280_CTRL_MEAS_GET_MODE(ctrl_meas) ((uint8_t)((ctrl_meas) & BMP280_MASK_CTRL_MEAS_MODE))
 #define BMP280_CTRL_MEAS_GET_OSRS_T(ctrl_meas) ((uint8_t)((ctrl_meas) & BMP280_MASK_CTRL_MEAS_OSRS_T))
 #define BMP280_CTRL_MEAS_GET_OSRS_P(ctrl_meas) ((uint8_t)((ctrl_meas) & BMP280_MASK_CTRL_MEAS_OSRS_P))
-
-/*
- *   CONFIGS
+/**
+ * @}
+ * 
  */
 
+/**
+ * @name CONFIG 
+ * @brief Config byte predefined values, masks and setting/getting macros
+ * @{
+ */
 // Standby time beetwen measurements in normal mode
 #define BMP280_CONFIG_T_STANDBY_POS 5
 #define BMP280_CONFIG_T_STANDBY_0_5_MS (0b000 << BMP280_CONFIG_T_STANDBY_POS)
@@ -126,28 +160,36 @@
 #define BMP280_CONFIG_GET_T_STANDBY(source) ((uint8_t)((source) & BMP280_MASK_CONFIG_T_STANDBY))
 #define BMP280_CONFIG_GET_FILTER(source) ((uint8_t)((source) & BMP280_MASK_CONFIG_FILTER))
 #define BMP280_CONFIG_GET_SPI_3_WIRE(source) ((uint8_t)((source) & BMP280_MASK_CONFIG_SPI_3_WIRE))
-
-/*
- *   STATUS
+/**
+ * @}
+ *
  */
 
-//  STATUS Masks
+/**
+ * @name STATUS
+ * @brief Status bits masks
+ * @{
+ */
 #define BMP280_STATUS_MEASURING_POS 3
 #define BMP280_STATUS_IM_UPADTE_POS 0
 
 #define BMP280_MASK_STATUS_MEASURING (0b1 << BMP280_STATUS_MEASURING_POS)
 #define BMP280_MASK_STATUS_IM_UPADTE (0b1 << BMP280_STATUS_IM_UPADTE_POS)
+/**
+ * @}
+ *
+ */
 
-
-/*
-*   MAPS VAL TO REG
-*/
-
+/**
+ * @name Users constants to registers mapping
+ * @brief Allows conversion between users constatnts to values writen to BMP280 registers
+ * @{
+ */
 // Struct for mapping attribute's values to registers
 struct bmp280_param_reg_elem
 {
-    struct sensor_value val;
-    uint8_t reg;
+    struct sensor_value val; /**< User constatnt */
+    uint8_t reg;             /**< Raw data  */
 };
 
 #define BMP280_MODE_CNT 3
@@ -177,7 +219,6 @@ const static struct bmp280_param_reg_elem ovrsm_p_map[] = {
     {BMP280_OVERSAMPLING_X16, BMP280_OVERSAMPLING_PRESSURE_X_16},
 };
 
-
 #define BMP280_T_STANDBY_CNT 8
 const static struct bmp280_param_reg_elem standby_t_map[] = {
     {BMP280_T_STANDBY_0_5MS, BMP280_CONFIG_T_STANDBY_0_5_MS},
@@ -191,7 +232,6 @@ const static struct bmp280_param_reg_elem standby_t_map[] = {
 
 };
 
-
 #define BMP280_FILTER_CNT 5
 const static struct bmp280_param_reg_elem filter_map[] = {
     {BMP280_FILTER_OFF, BMP280_CONFIG_FILTER_OFF},
@@ -200,8 +240,10 @@ const static struct bmp280_param_reg_elem filter_map[] = {
     {BMP280_FILTER_X8, BMP280_CONFIG_FILTER_X_8},
     {BMP280_FILTER_X16, BMP280_CONFIG_FILTER_X_16},
 };
-
-//defaults
+/**
+ * @}
+ *
+ */
 
 #define BMP280_DEFAULT_MODE_IDX 0
 #define BMP280_DEFAULT_T_STBY_IDX 0

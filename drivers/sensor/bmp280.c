@@ -9,9 +9,10 @@
  */
 
 /**
- *   @file
- *   @brief Memory address map, default values and configs
- *   for BMP280 sensor according to datasheet
+ *   @file bmp280.c
+ *   @brief Implemenatation of the BMP280 sensor driver for Zepyhr RTOS
+ * 		This driver inculdes I2C communication, runtime sensor configuration
+ * 		and compensation methods described in datasheet
  */
 
 #define DT_DRV_COMPAT custom_bmp280
@@ -24,7 +25,9 @@
 /*
  *	Definitions
  */
-
+/**
+ * @brief
+ */
 struct bmp280_calibTemperatureData
 {
 	uint16_t dT1;
@@ -99,46 +102,76 @@ struct bmp280_data
 };
 
 /*
- *	Helper function definitions
+ *	Helper function declaraction
  */
 
-// status getters
+/** @brief  Check if BMP280 everything is copied (Im bit) */
 static bool bmp280_isImReady(const struct device *dev);
+
+/** @brief Check if BMP280 is currently measuring */
 static bool bmp280_isMeasuring(const struct device *dev);
+
+/** @brief  Check if chipID is valid */
 static bool bmp280_chipID_OK(const struct device *dev);
-// get raw data from sensor
+
+/** @brief Read raw pressure bytes from sensor */
 static int bmp280_getPressureRaw(const struct device *dev);
+
+/** @brief  Read raw temperature bytes from sensor*/
 static int bmp280_getTemperatureRaw(const struct device *dev);
 
-// getters and setters of ctrl_meas
+/** @brief  Get Control Measuremnt byte and store to bmp280_data.ctrl_meas */
 static int bmp280_getCtrlMeas(const struct device *dev);
+
+/** @brief  Set Control Measuremnt byte and using bmp280_data.ctrl_meas */
 static int bmp280_setCtrlMeas(const struct device *dev);
 
-// getters and setters of configs
+/** @brief  Get Configuration byte */
 static int bmp280_getConfig(const struct device *dev, uint8_t *configs);
+
+/** @brief  Set Configuration byte */
 static int bmp280_setConfig(const struct device *dev, uint8_t t_stby, uint8_t mask);
 
-// Compensation and conversion function adapted from Bosh BMP280 datasheet
+/** @brief Compensation and conversion function adapted from Bosh BMP280 datasheet for temperature*/
 static int calibTemp(const struct device *dev, struct sensor_value *temperature);
+
+/** @brief Compensation and conversion function adapted from Bosh BMP280 datasheet for pressure*/
 static int calibPress(const struct device *dev, struct sensor_value *pressure);
 
-// Waiting time estimation in force mode
+/** @brief Waiting time estimation for new data in force mode */
 static uint16_t bmp280_timeToRead_ms(const struct device *dev);
 
-// Software reset
+/** @brief Software reset of sensor */
 static int bmp280_softReset(const struct device *dev);
 
-// struct comparsion
+/** @brief Compares to sensor value structures */
 static bool sensor_value_equal(const struct sensor_value *v1, const struct sensor_value *v2);
+/** @brief Compares sensor value structure to val1 and val2 provided as integers */
 static bool int_sensor_value_equal(const struct sensor_value *v1, const int val1, const int val2);
 
-// attribute (struct sensor_value) to bmp280 regs converter
+/** @brief attribute(struct sensor_value) to bmp280 regs converter (uses mappings from custom_bmp280_priv.h)
+ * @see drivers/sensor/bmp280_priv.h for mappings
+ * */
 static inline int bmp280_attrValToReg(const struct bmp280_param_reg_elem *map, size_t s, const struct sensor_value *attr, uint8_t *reg);
+
+/** @brief  bmp280 regs to attribute(struct sensor_value) converter (uses mappings from custom_bmp280_priv.h)
+ * @see drivers/sensor/bmp280_priv.h for mappings
+ * */
+static inline int bmp280_regToAttrVal(const struct bmp280_param_reg_elem *map, size_t s, struct sensor_value *attr, const uint8_t reg);
 
 /*
  *	Implementations of main API functions
  */
 
+/**
+ * @brief Initialize BMP280 driver
+ * @note Default settings are fetched from the Devicetree node.
+ * Refer to dts/bindings/sensor/bosch,bmp280-custom.yaml for valid property values.
+ * @param dev Pointer to device structure
+ * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
+ * @retval -ENXIO if device chipID mismatch (expected 0x58) or bus is not working
+ * @retval -EINVAL if invalid configuration in device tree
+ */
 static int bmp280_init(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
@@ -146,7 +179,7 @@ static int bmp280_init(const struct device *dev)
 
 	if (!conf->ioAPI.methods.isBusReady(dev))
 	{
-		return -ENODEV;
+		return -ENXIO;
 	}
 	if (!bmp280_chipID_OK(dev))
 	{
@@ -235,6 +268,17 @@ static int bmp280_init(const struct device *dev)
 	return 0;
 }
 
+/**
+ * @brief Fetch ADC data from sensor
+ *
+ * @param dev Pointer to device structure
+ * @param channel Sensor channel to fetch data from (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS,SENSOR_CHAN_ALL)
+ * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
+ * @retval -ENXIO if device chipID mismatch (expected 0x58)
+ * @retval -ETIMEDOUT timed out waiting for data ready
+ * @retval -ENODATA if read 0x80 from registers
+ * @retval -ENOTSUP if channel is not supported
+ */
 static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel channel)
 {
 	struct bmp280_data *data = dev->data;
@@ -296,31 +340,51 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 	return 0;
 }
 
-static int bmp280_chanel_get(const struct device *dev, enum sensor_channel channel, struct sensor_value *reading)
+/**
+ * @brief Convert raw ADC data to human readable
+ *
+ * @param dev Pointer to device structure
+ * @param channel Sensor channel to convert data from (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS)
+ * @param reading Pointer to sencsor_value structure where store data to
+ * @return 0 on success
+ * @retval -ENOTSUP if channel is not supported
+ * @retval -EINVAL if division by zero occurse during pressure conversion
+ */
+static int bmp280_channel_get(const struct device *dev, enum sensor_channel channel, struct sensor_value *reading)
 {
 	switch (channel)
 	{
 	case SENSOR_CHAN_AMBIENT_TEMP:
 		calibTemp(dev, reading);
-		break;
+		return 0;
 	case SENSOR_CHAN_PRESS:
 		if (!((struct bmp280_data *)(dev->data))->calib.t_cooef_cmpt)
 		{
 			struct sensor_value dummy;
 			calibTemp(dev, &dummy);
 		}
-		calibPress(dev, reading);
-
-		break;
+		return calibPress(dev, reading);
 	default:
 		return -ENOTSUP;
 	}
 	return 0;
 }
 
+/**
+ * @brief Set sensor attribute or configuration
+ *
+ * @param dev Pointer to device structure
+ * @param channel Channel for which attributes are set (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS,SENSOR_CHAN_ALL)
+ * @param attr Attribute to be set (supported SENSOR_ATTR_OVERSAMPLING, BMP280_ATTR_T_STANDBY,
+ * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE)
+ * @param val	Pointer to sensor_value structure where the value set channel's attribute to
+ * @see include/zephyr/drivers/sensor/custom_bmp280.h for predefined values and custom attributes
+ * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
+ * @retval -ENOTSUP if channel, attribute or attribute value is not supported
+ */
 static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel, enum sensor_attribute attr, const struct sensor_value *val)
 {
-	// const struct bmp280_config *conf = dev->config;
+	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
 	uint8_t reg;
 	int ret = 0;
@@ -381,7 +445,7 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 		else
 			return -ENOTSUP;
 	case BMP280_ATTR_3_WIRE_SPI:
-		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		if ((channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS) && !conf->ioAPI.methods.busType())
 		{
 
 			if (int_sensor_value_equal(val, 1, 0))
@@ -419,11 +483,100 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 	}
 	return 0;
 }
-
+// TODO: implement
+/**
+ * @brief Get sensor attribute or current configuration
+ *
+ * @param dev Pointer to device structure
+ * @param channel Channel for which attribute is read (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS,SENSOR_CHAN_ALL)
+ * @param attr Attribute to be retrieved (supported SENSOR_ATTR_OVERSAMPLING, BMP280_ATTR_T_STANDBY,
+ * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE)
+ * @param val	Pointer to sensor_value structure where the current value will be stored
+ * @see include/zephyr/drivers/sensor/custom_bmp280.h for predefined values and custom attributes
+ * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
+ * @retval -ENOTSUP if channel, attribute or attribute value is not supported
+ */
 static int bmp280_attr_get(const struct device *dev, enum sensor_channel channel, enum sensor_attribute attr, struct sensor_value *val)
 {
+	const struct bmp280_config *config = dev->config;
+	struct bmp280_data *data = dev->data;
+	int c = 0;
+	switch (attr)
+	{
+	case SENSOR_ATTR_OVERSAMPLING:
+		c = bmp280_getCtrlMeas(dev);
+		if (c)
+			return c;
+		switch (channel)
+		{
+		case SENSOR_CHAN_AMBIENT_TEMP:
+			return bmp280_regToAttrVal(ovrsm_t_map, BMP280_OVERSAMPLING_CNT, val, BMP280_CTRL_MEAS_GET_OSRS_T(data->ctrl_meas));
+		case SENSOR_CHAN_PRESS:
+			return bmp280_regToAttrVal(ovrsm_p_map, BMP280_OVERSAMPLING_CNT, val, BMP280_CTRL_MEAS_GET_OSRS_P(data->ctrl_meas));
+		default:
+			return -ENOTSUP;
+		}
+
+	case BMP280_ATTR_MODE:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			c = bmp280_getCtrlMeas(dev);
+			if (c)
+				return c;
+
+			return bmp280_regToAttrVal(mode_map, BMP280_MODE_CNT, val, BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas));
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_FILTER:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			uint8_t configs;
+			c = bmp280_getConfig(dev, &configs);
+			if (c)
+				return c;
+
+			return bmp280_regToAttrVal(filter_map, BMP280_FILTER_CNT, val, BMP280_CONFIG_GET_FILTER(configs));
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_T_STANDBY:
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			uint8_t configs;
+			c = bmp280_getConfig(dev, &configs);
+			if (c)
+				return c;
+
+			return bmp280_regToAttrVal(standby_t_map, BMP280_T_STANDBY_CNT, val, BMP280_CONFIG_GET_T_STANDBY(configs));
+		}
+		else
+			return -ENOTSUP;
+	case BMP280_ATTR_3_WIRE_SPI:
+		if ((channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS) && !config->ioAPI.methods.busType())
+		{
+			uint8_t configs;
+			c = bmp280_getConfig(dev, &configs);
+			if (c)
+				return c;
+			if (BMP280_CONFIG_GET_SPI_3_WIRE(configs) == BMP280_CONFIG_SPI_3_WIRE_ON)
+			{
+				*val = BMP280_3_WIRE_SPI_ON;
+			}
+			else
+			{
+				*val = BMP280_3_WIRE_SPI_OFF;
+			}
+			return 0;
+		}
+		else
+			return -ENOTSUP;
+	default:
+		break;
+	}
 	return -ENOTSUP;
 }
+
 /*
  *	Implementations of helper functions
  */
@@ -515,7 +668,6 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 		data->calib.t = v1 + v2;
 		data->calib.t_cooef_cmpt = 1;
 	}
-
 
 	uint32_t tempT = (data->calib.t * 5 + 128) >> 8;
 	temperature->val1 = tempT / 100;
@@ -668,6 +820,19 @@ static inline int bmp280_attrValToReg(const struct bmp280_param_reg_elem *map, s
 	return -EINVAL;
 }
 
+static inline int bmp280_regToAttrVal(const struct bmp280_param_reg_elem *map, size_t s, struct sensor_value *attr, const uint8_t reg)
+{
+	for (size_t i = 0; i < s; i++)
+	{
+		if (map[i].reg == reg)
+		{
+			*attr = map[i].val;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
 /*
  *	 bmp280 IO API I2C
  */
@@ -775,7 +940,7 @@ const struct sensor_driver_api bmp280_api = {
 	.attr_set = bmp280_attr_set,
 	.attr_get = bmp280_attr_get,
 	.sample_fetch = bmp280_sample_fetch,
-	.channel_get = bmp280_chanel_get};
+	.channel_get = bmp280_channel_get};
 #define BMP280_ON_I2C_DEF(inst) {.i2c = I2C_DT_SPEC_INST_GET(inst)}
 #define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
 

@@ -4,12 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file custom_bmp280.h
+ * @brief BMP280 Driver config Constants for runtime use
+ * @author Franciszek Trzeciak
+ * @date 2026-04-22
+ */
 #include <zephyr/drivers/sensor.h>
-
 
 #ifndef CUSTOM_BMP280_H
 #define CUSTOM_BMP280_H
-
+/**
+ * @brief BMP280 specific attributes
+ *
+ */
 enum bmp280_attribute
 {
     BMP280_ATTR_T_STANDBY = SENSOR_ATTR_PRIV_START,
@@ -20,8 +28,10 @@ enum bmp280_attribute
 
 };
 
-// Standby time (in normal mode) constatnts
-
+/**
+ * @name BMP280 Standby time between measurement in normal mode
+ * @{
+ */
 #define BMP280_T_STANDBY_0_5MS (struct sensor_value){.val1 = 0, .val2 = 500}
 #define BMP280_T_STANDBY_62_5MS (struct sensor_value){.val1 = 0, .val2 = 62500}
 #define BMP280_T_STANDBY_125MS (struct sensor_value){.val1 = 0, .val2 = 125000}
@@ -30,36 +40,64 @@ enum bmp280_attribute
 #define BMP280_T_STANDBY_1000MS (struct sensor_value){.val1 = 1, .val2 = 0}
 #define BMP280_T_STANDBY_2000MS (struct sensor_value){.val1 = 2, .val2 = 0}
 #define BMP280_T_STANDBY_4000MS (struct sensor_value){.val1 = 4, .val2 = 0}
+/**
+ * @}
+ */
 
-// IIR Filter modes constatnts
-
+/**
+ * @name BMP280 IIR Filter coeficient
+ * @{
+ */
 #define BMP280_FILTER_OFF (struct sensor_value){.val1 = 0, .val2 = 0}
 #define BMP280_FILTER_X2 (struct sensor_value){.val1 = 2, .val2 = 0}
 #define BMP280_FILTER_X4 (struct sensor_value){.val1 = 4, .val2 = 0}
 #define BMP280_FILTER_X8 (struct sensor_value){.val1 = 8, .val2 = 0}
 #define BMP280_FILTER_X16 (struct sensor_value){.val1 = 16, .val2 = 0}
+/**
+ * @}
+ */
 
-// Oversampling constants
-
+/**
+ * @name BMP280 Oversampling
+ * @{
+ */
 #define BMP280_OVERSAMPLING_OFF (struct sensor_value){.val1 = 0, .val2 = 0}
 #define BMP280_OVERSAMPLING_X1 (struct sensor_value){.val1 = 1, .val2 = 0}
 #define BMP280_OVERSAMPLING_X2 (struct sensor_value){.val1 = 2, .val2 = 0}
 #define BMP280_OVERSAMPLING_X4 (struct sensor_value){.val1 = 4, .val2 = 0}
 #define BMP280_OVERSAMPLING_X8 (struct sensor_value){.val1 = 8, .val2 = 0}
 #define BMP280_OVERSAMPLING_X16 (struct sensor_value){.val1 = 16, .val2 = 0}
+/**
+ * @}
+ */
 
-// 3 wire spi on/off
+/**
+ * @name BMP280 Enable/Disable SPI 3 wire
+ * @{
+ */
+#define BMP280_3_WIRE_SPI_OFF (struct sensor_value){.val1 = 0, .val2 = 0}
+#define BMP280_3_WIRE_SPI_ON (struct sensor_value){.val1 = 1, .val2 = 0}
+/**
+ * @}
+ */
 
-#define BMP280_3_WIRE_SPI_OFF (struct sensor_value) {.val1 = 0, .val2 = 0}
-#define BMP280_3_WIRE_SPI_ON (struct sensor_value) {.val1 = 1, .val2 = 0}
-
-// Mode constatnts
-
+/**
+ * @name BMP280 Working modes
+ * @{
+ */
 #define BMP280_MODE_SLEEP (struct sensor_value){.val1 = 0, .val2 = 0}
 #define BMP280_MODE_FORCED (struct sensor_value){.val1 = 1, .val2 = 0}
 #define BMP280_MODE_NORMAL (struct sensor_value){.val1 = 2, .val2 = 0}
-
-
+/**
+ * @}
+ */
+/**
+ * @name BMP280 Reset val
+ * @{
+ */
 #define BMP280_RESET (struct sensor_value){.val1 = 1, .val2 = 0}
+/**
+ * @}
+ */
 
 #endif
