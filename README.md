@@ -15,6 +15,7 @@ Compatible with Zephyr RTOS
     ```
 3.  Add to `prj.conf` following lines to enable usage of driver:
     ```kconfig
+    CONFIG_I2C=y
     CONFIG_SENSOR=y
     CONFIG_BMP280=y
     ```
@@ -24,22 +25,19 @@ Compatible with Zephyr RTOS
 
     &i2c0 {
         status = "okay";
-        pinctrl-0 = <&i2c0_alt>;
-        pinctrl-names = "default";
-        clock-frequency = <100000>; 
-    
+        
         bmp280: bmp280@76 {
-            compatible = "custom,bmp280-i2c";
+            compatible = "custom,bmp280";
             reg = <0x76>;
             status = "okay";
-            # set some configs (can be done also using sensor_attr_set in code)  
+            // Set initial sensor configuration
             mode = <BMP280_MODE_NORMAL>;
             temperature-oversampling = <BMP280_OVERSAMPLING_X16>;
             pressure-oversampling = <BMP280_OVERSAMPLING_X16>;
             iir-filter = <BMP280_FILTER_X8>;
             t-standby = <BMP280_T_STANDBY_0_5MS>;
         };
-    
+        
     };
     ```
 ## Example
@@ -74,8 +72,8 @@ Compatible with Zephyr RTOS
 ## Further Development
 - [ ] SPI communication
 - [ ] Read and Decode API
-
+## Credits
 ### Licence
-Released under Apache-2.0 licence
+Released under Apache-2.0 licence.
 ### Author
 Franciszek Trzeciak

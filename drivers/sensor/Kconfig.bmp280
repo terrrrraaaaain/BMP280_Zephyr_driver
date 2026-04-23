@@ -1,11 +1,10 @@
 # Copyright (c) 2026 Franciszek Trzeciak
 # SPDX-License-Identifier: Apache-2.0
 
-config BMP280
+config CUSTOM_BMP280
     bool "BMP280 Pressure and temperature sensor (FT)"
     default y
     depends on DT_HAS_CUSTOM_BMP280_ENABLED
     depends on SENSOR
-    select I2C
     help
         Enable driver for unified BMP280 sensor

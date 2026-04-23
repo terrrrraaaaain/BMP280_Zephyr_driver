@@ -535,7 +535,7 @@ static int bmp280_attr_get(const struct device *dev, enum sensor_channel channel
 	const struct bmp280_config *config = dev->config;
 	struct bmp280_data *data = dev->data;
 	int c = 0;
-	switch (attr)
+	switch ((int)attr)
 	{
 	case SENSOR_ATTR_OVERSAMPLING:
 		c = bmp280_getCtrlMeas(dev);
