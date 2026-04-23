@@ -10,10 +10,10 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor/custom_bmp280.h> // see for more settings
 
-#define SETTINGS // show config, then change and show again
+// #define SETTINGS // show config, then change and show again
 // #define MEASURE // measure loop
 
-// #define ALL // all above
+#define ALL // all above
 
 #ifdef ALL
 #define SETTINGS

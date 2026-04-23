@@ -69,6 +69,20 @@ Compatible with Zephyr RTOS
         return 0;
     }
 ```
+## Demo
+Driver demo code can be found in `samples/demo`.
+
+You can run it like this:
+```bash
+    west build -p always -b esp32c6_devkitc/esp32c6/hpcore samples/demo
+    west flash
+``` 
+There are three options for demo:
+
+- `#define MEASURE` start measuring in a loop
+- `#define SETTINGS` to show current settings and then change them
+- `#define ALL` combines all above
+
 ## Further Development
 - [ ] SPI communication
 - [ ] Read and Decode API
