@@ -1,0 +1,20 @@
+#include <dt-bindings/sensor/custom_bmp280.h>
+
+&i2c0 {
+    status = "okay";
+    bmp280: bmp280@76 {
+        compatible = "custom,bmp280";
+        reg = <0x76>;
+        status = "okay";
+        
+        /* Initial Configuration
+         * See dt-bindings/sensor/custom_bmp280.h for more options
+         */
+        mode = <BMP280_MODE_NORMAL>;
+        temperature-oversampling = <BMP280_OVERSAMPLING_X16>;
+        pressure-oversampling = <BMP280_OVERSAMPLING_X16>;
+        iir-filter = <BMP280_FILTER_X8>;
+        t-standby = <BMP280_T_STANDBY_62_5MS>;
+    };
+    
+};

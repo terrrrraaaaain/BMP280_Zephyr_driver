@@ -45,7 +45,7 @@ enum bmp280_attribute
  */
 
 /**
- * @name BMP280 IIR Filter coeficient
+ * @name BMP280 IIR Filter coefficient
  * @{
  */
 #define BMP280_FILTER_OFF (struct sensor_value){.val1 = 0, .val2 = 0}
@@ -95,7 +95,9 @@ enum bmp280_attribute
  * @name BMP280 Reset val
  * @{
  */
-#define BMP280_RESET (struct sensor_value){.val1 = 1, .val2 = 0}
+#define BMP280_RESET_TO_DEFAULT (struct sensor_value){.val1 = 1, .val2 = 0}
+#define BMP280_RESET_TO_SLEEP (struct sensor_value){.val1 = 2, .val2 = 0}
+
 /**
  * @}
  */

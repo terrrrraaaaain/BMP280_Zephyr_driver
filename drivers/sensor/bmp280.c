@@ -176,8 +176,10 @@ static int calibPress(const struct device *dev, struct sensor_value *pressure);
 /** @brief Waiting time estimation for new data in force mode */
 static uint16_t bmp280_timeToRead_ms(const struct device *dev);
 
+/** @brief Software reset of sensor with DT parameters initialization*/
+static int bmp280_softResetToDefault(const struct device *dev);
 /** @brief Software reset of sensor */
-static int bmp280_softReset(const struct device *dev);
+static int bmp280_softResetToSleep(const struct device *dev);
 
 /** @brief Compares to sensor value structures */
 static bool sensor_value_equal(const struct sensor_value *v1, const struct sensor_value *v2);
@@ -205,9 +207,8 @@ static inline int bmp280_regToAttrVal(const struct bmp280_param_reg_elem *map, s
  * @param dev Pointer to device structure
  * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
  * @retval -ENXIO if device chipID mismatch (expected 0x58) or bus is not working
- * @retval -EINVAL if invalid configuration in device tree
  */
-static int bmp280_init(const struct device *dev)
+static int bmp280_init_bare(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 	struct bmp280_data *data = dev->data;
@@ -248,6 +249,28 @@ static int bmp280_init(const struct device *dev)
 	data->calib.pCalib.dP9 = (calBuf[23] << 8) | calBuf[24];
 
 	data->calib.t_cooef_cmpt = 0; // reset temp calibration info readiness flag for pressure calibration
+	bmp280_getCtrlMeas(dev);
+	return 0;
+}
+
+/**
+ * @brief Initialize BMP280 driver with defualt DT configuration
+ * @note Default settings are fetched from the Devicetree node.
+ * Refer to dts/bindings/sensor/bosch,bmp280-custom.yaml for valid property values.
+ * @param dev Pointer to device structure
+ * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
+ * @retval -ENXIO if device chipID mismatch (expected 0x58) or bus is not working
+ * @retval -EINVAL if invalid configuration in device tree
+ */
+static int bmp280_init_full(const struct device *dev)
+{
+	const struct bmp280_config *conf = dev->config;
+	struct bmp280_data *data = dev->data;
+	int c = 0;
+
+	c = bmp280_init_bare(dev);
+	if (c)
+		return c;
 
 	// DT configuration
 	if (conf->DTparams.mode >= 0 && conf->DTparams.mode <= BMP280_MODE_CNT)
@@ -336,6 +359,7 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 			if (cycles >= 500)
 				return -ETIMEDOUT;
 			k_usleep(100);
+			cycles = cycles + 1;
 		}
 	}
 	else
@@ -347,6 +371,7 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 				if (cycles >= 400)
 					return -ETIMEDOUT;
 				k_usleep(200);
+				cycles = cycles + 1;
 			}
 		}
 	}
@@ -410,12 +435,12 @@ static int bmp280_channel_get(const struct device *dev, enum sensor_channel chan
  *
  * @param dev Pointer to device structure
  * @param channel Channel for which attributes are set (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS,SENSOR_CHAN_ALL)
- * @param attr Attribute to be set (supported SENSOR_ATTR_OVERSAMPLING, BMP280_ATTR_T_STANDBY,
- * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE)
+ * @param attr Attribute to be set (supported SENSOR_ATTR_OVERSAMPLING (only in sleep mode), BMP280_ATTR_T_STANDBY,
+ * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE (only in sleep mode))
  * @param val	Pointer to sensor_value structure where the value set channel's attribute to
  * @see include/zephyr/drivers/sensor/custom_bmp280.h for predefined values and custom attributes
  * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
- * @retval -ENOTSUP if channel, attribute or attribute value is not supported
+ * @retval -ENOTSUP if channel, attribute or attribute value is not supported at all or in current mode
  */
 static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel, enum sensor_attribute attr, const struct sensor_value *val)
 {
@@ -423,6 +448,13 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 	struct bmp280_data *data = dev->data;
 	uint8_t reg;
 	int ret = 0;
+	if (BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_NORMAL_C)
+	{
+		if ((int) attr == SENSOR_ATTR_OVERSAMPLING || (int)attr == BMP280_ATTR_MODE)
+		{
+			return -ENOTSUP;
+		}
+	}
 	switch ((int)attr)
 	{
 	case SENSOR_ATTR_OVERSAMPLING:
@@ -501,18 +533,29 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 
 			if (int_sensor_value_equal(val, 1, 0))
 			{
-				return bmp280_softReset(dev);
+				return bmp280_softResetToDefault(dev);
 			}
+			else if (int_sensor_value_equal(val, 2, 0))
+			{
+				return bmp280_softResetToSleep(dev);
+			}
+			else
+				return -EINVAL;
 		}
 		else
 			return -ENOTSUP;
+
 	case BMP280_ATTR_MODE:
-		ret = bmp280_attrValToReg(mode_map, BMP280_MODE_CNT, val, &reg);
-		if (ret)
-			return ret;
-		data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, reg);
-		return bmp280_setCtrlMeas(dev);
-		break;
+		if (channel == SENSOR_CHAN_ALL || channel == SENSOR_CHAN_AMBIENT_TEMP || channel == SENSOR_CHAN_PRESS)
+		{
+			ret = bmp280_attrValToReg(mode_map, BMP280_MODE_CNT, val, &reg);
+			if (ret)
+				return ret;
+			data->ctrl_meas = BMP280_CTRL_MEAS_SET_MODE(data->ctrl_meas, reg);
+			return bmp280_setCtrlMeas(dev);
+		}
+		else
+			return -ENOTSUP;
 	default:
 		return -ENOTSUP;
 	}
@@ -619,6 +662,7 @@ static int bmp280_setCtrlMeas(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 	const struct bmp280_data *data = dev->data;
+
 	return conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_CTRL_MEAS, data->ctrl_meas);
 }
 
@@ -763,7 +807,7 @@ static bool bmp280_chipID_OK(const struct device *dev)
 	}
 	return 1;
 }
-static int bmp280_softReset(const struct device *dev)
+static int bmp280_softResetToDefault(const struct device *dev)
 {
 	const struct bmp280_config *conf = dev->config;
 
@@ -774,7 +818,21 @@ static int bmp280_softReset(const struct device *dev)
 	int c = conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_RESET, BMP280_RESET_VAL);
 	if (c)
 		return c;
-	return bmp280_init(dev);
+	return bmp280_init_full(dev);
+}
+
+static int bmp280_softResetToSleep(const struct device *dev)
+{
+	const struct bmp280_config *conf = dev->config;
+
+	if (!conf->ioAPI.methods.isBusReady(dev))
+	{
+		return -ENODEV;
+	}
+	int c = conf->ioAPI.methods.writeByte(dev, BMP280_ADDR_RESET, BMP280_RESET_VAL);
+	if (c)
+		return c;
+	return bmp280_init_bare(dev);
 }
 
 static uint16_t bmp280_timeToRead_ms(const struct device *dev)
@@ -1008,7 +1066,7 @@ const struct sensor_driver_api bmp280_api = {
 		},                                                                                           \
 	};                                                                                               \
 	SENSOR_DEVICE_DT_INST_DEFINE(inst,                                                               \
-								 bmp280_init,                                                        \
+								 bmp280_init_full,                                                   \
 								 NULL,                                                               \
 								 &bmp280_data_##inst,                                                \
 								 &bmp280_config_##inst,                                              \
