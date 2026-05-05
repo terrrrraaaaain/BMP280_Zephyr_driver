@@ -64,7 +64,9 @@ struct bmp280_calibData
 	struct bmp280_calibTemperatureData tCalib;
 	struct bmp280_calibPressureData pCalib;
 	int32_t t; /** for pressure compensation from temperature compensation*/
+	int32_t p; /** for altidut computation from pressure compensation. 24.8 format*/
 	bool t_cooef_cmpt;
+	bool p_cooef_cmpt;
 };
 
 /**
@@ -132,6 +134,7 @@ struct bmp280_data
 {
 	uint8_t press_raw[3];
 	uint8_t temp_raw[3];
+	uint32_t pressSL;
 	uint8_t ctrl_meas;
 	struct bmp280_calibData calib;
 };
@@ -171,7 +174,12 @@ static int bmp280_setConfig(const struct device *dev, uint8_t t_stby, uint8_t ma
 static int calibTemp(const struct device *dev, struct sensor_value *temperature);
 
 /** @brief Compensation and conversion function adapted from Bosh BMP280 datasheet for pressure*/
+static int calibPress24_8(const struct device *dev, uint32_t *pressure);
+
+/** @brief  Converts  pressure from Q24.8 format to decimal */
 static int calibPress(const struct device *dev, struct sensor_value *pressure);
+
+static int computeAltitude(const struct device *dev, struct sensor_value *alt);
 
 /** @brief Waiting time estimation for new data in force mode */
 static uint16_t bmp280_timeToRead_ms(const struct device *dev);
@@ -249,6 +257,8 @@ static int bmp280_init_bare(const struct device *dev)
 	data->calib.pCalib.dP9 = (calBuf[23] << 8) | calBuf[24];
 
 	data->calib.t_cooef_cmpt = 0; // reset temp calibration info readiness flag for pressure calibration
+	data->calib.p_cooef_cmpt = 0; // reset pressure calibration info readiness flag for altitude calibration
+
 	bmp280_getCtrlMeas(dev);
 	return 0;
 }
@@ -377,6 +387,8 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 	}
 	int c = bmp280_getCtrlMeas(dev);
 	data->calib.t_cooef_cmpt = 0;
+	data->calib.p_cooef_cmpt = 0;
+
 	switch (channel)
 	{
 	case SENSOR_CHAN_AMBIENT_TEMP:
@@ -450,7 +462,7 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 	int ret = 0;
 	if (BMP280_CTRL_MEAS_GET_MODE(data->ctrl_meas) == BMP280_MODE_NORMAL_C)
 	{
-		if ((int) attr == SENSOR_ATTR_OVERSAMPLING || (int)attr == BMP280_ATTR_MODE)
+		if ((int)attr == SENSOR_ATTR_OVERSAMPLING || (int)attr == BMP280_ATTR_MODE)
 		{
 			return -ENOTSUP;
 		}
@@ -746,7 +758,6 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 		data->calib.t = v1 + v2;
 		data->calib.t_cooef_cmpt = 1;
 	}
-
 	uint32_t tempT = (data->calib.t * 5 + 128) >> 8;
 	temperature->val1 = tempT / 100;
 	temperature->val2 = (tempT) % 100 * 1000;
@@ -755,29 +766,79 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 }
 
 // Adapted from Bosh BMP280 datasheet
+static int calibPress24_8(const struct device *dev, uint32_t *pressure)
+{
+	struct bmp280_data *data = dev->data;
+	if (!data->calib.p_cooef_cmpt)
+	{
+		int64_t v1 = ((int64_t)data->calib.t) - 128000;
+		int64_t v2 = v1 * v1 * (int64_t)data->calib.pCalib.dP6;
+		v2 = v2 + ((v1 * (int64_t)data->calib.pCalib.dP5) << 17);
+		v2 = v2 + (((int64_t)data->calib.pCalib.dP4) << 35);
+		v1 = ((v1 * v1 * (int64_t)data->calib.pCalib.dP3) >> 8) +
+			 ((v1 * (int64_t)data->calib.pCalib.dP2) << 12);
+		v1 = (((((int64_t)1) << 47) + v1)) * ((int64_t)data->calib.pCalib.dP1) >> 33;
+		if (v1 == 0)
+			return -EINVAL; // division by 0
+		int64_t tempP = data->press_raw[0] << 12 | data->press_raw[1] << 4 | data->press_raw[2] >> 4;
+		tempP = 1048576 - tempP;
+		tempP = (((tempP << 31) - v2) * 3125) / v1;
+		v1 = (((int64_t)data->calib.pCalib.dP9) * (tempP >> 13) * (tempP >> 13)) >> 25;
+		v2 = (((int64_t)data->calib.pCalib.dP8) * tempP) >> 19;
+		data->calib.p = ((tempP + v1 + v2) >> 8) + (((int64_t)data->calib.pCalib.dP7) << 4);
+		data->calib.p_cooef_cmpt = 1;
+		pressure = data->calib.p;
+	}
+	else
+	{
+		pressure = data->calib.p;
+	}
+	return 0;
+}
+
 static int calibPress(const struct device *dev, struct sensor_value *pressure)
 {
-
-	struct bmp280_data *data = dev->data;
-	int64_t v1 = ((int64_t)data->calib.t) - 128000;
-	int64_t v2 = v1 * v1 * (int64_t)data->calib.pCalib.dP6;
-	v2 = v2 + ((v1 * (int64_t)data->calib.pCalib.dP5) << 17);
-	v2 = v2 + (((int64_t)data->calib.pCalib.dP4) << 35);
-	v1 = ((v1 * v1 * (int64_t)data->calib.pCalib.dP3) >> 8) +
-		 ((v1 * (int64_t)data->calib.pCalib.dP2) << 12);
-	v1 = (((((int64_t)1) << 47) + v1)) * ((int64_t)data->calib.pCalib.dP1) >> 33;
-	if (v1 == 0)
-		return -EINVAL; // division by 0
-	int64_t tempP = data->press_raw[0] << 12 | data->press_raw[1] << 4 | data->press_raw[2] >> 4;
-	tempP = 1048576 - tempP;
-	tempP = (((tempP << 31) - v2) * 3125) / v1;
-	v1 = (((int64_t)data->calib.pCalib.dP9) * (tempP >> 13) * (tempP >> 13)) >> 25;
-	v2 = (((int64_t)data->calib.pCalib.dP8) * tempP) >> 19;
-	tempP = ((tempP + v1 + v2) >> 8) + (((int64_t)data->calib.pCalib.dP7) << 4);
+	uint32_t tempP = 0;
+	calibPress24_8(dev, &tempP);
 	tempP *= 1000;		// mPa
 	tempP = tempP >> 8; // conversion from 24.8 code to integer mPa
 	pressure->val1 = (int32_t)tempP / 1000000;
 	pressure->val2 = (int32_t)tempP % 1000000;
+	return 0;
+}
+
+static int32_t ln(uint32_t x)
+{
+	int32_t result = 0;
+	int32_t n = (find_msb_set(x) - 1) - 8;
+	result = n * BMP280_LN2_Q24_8;
+	if (n >= 0)
+		x = x >> n;
+	else
+		x = x << (-n);
+	x -= 256;
+
+	result += (int32_t)((((int64_t)BMP280_LN2_COOEF_1_Q24_8 * ((x * x) >> 8)) + ((int64_t)BMP280_LN2_COOEF_2_Q24_8 * x)) >> 8);
+	return result;
+}
+
+static int computeAltitude(const struct device *dev, struct sensor_value *alt)
+{
+	struct bmp280_data *data = dev->data;
+	uint32_t press;
+	uint32_t temp;
+	int ret = calibPress24_8(dev, &press);
+	if (ret)
+		return ret;
+	if (!data->calib.t_cooef_cmpt)
+	{
+		struct sensor_value dummy;
+		calibTemp(dev, &dummy);
+	}
+	temp = ((data->calib.t / 20) + BMP280_CELSSIUS_TO_KELVIN_Q24_8);
+	int32_t h = (((int64_t)temp * (ln(data->pressSL) - ln(press)) + 128) >> 8) * BMP280_ALT_CONST_Q24_8 >> 8;
+	alt->val1 = h / 256;
+	alt->val2 = (int32_t)((int64_t)((h % 256) * 1000000) / 256);
 	return 0;
 }
 

@@ -84,6 +84,7 @@ There are three options for demo:
 - `#define ALL` combines all above
 
 ## Further Development
+- [ ] Altimeter channel
 - [ ] SPI communication
 - [ ] Read and Decode API
 ## Credits

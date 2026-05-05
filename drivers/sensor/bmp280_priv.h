@@ -70,6 +70,24 @@
 /** @brief  Value read from BMP280_ADDR_PRESS_MSB or BMP280_ADDR_TEMP_MSB when measuring is off*/
 #define BMP280_NO_VALUE_1 0x80
 
+/** @brief Celssius to Kelvins converter*/
+#define BMP280_CELSSIUS_TO_KELVIN_Q24_8 69926
+
+/** @brief ln(2) in Q24.8*/
+#define BMP280_LN2_Q24_8 177
+
+/**
+ * @name ln(x) aproximation cooefs in Q24.8
+ * @{
+ */
+#define BMP280_LN2_COOEF_1_Q24_8 72
+#define BMP280_LN2_COOEF_2_Q24_8 246
+/**
+ * @}
+ */
+/** @brief Barometric constant R/(g*M)≈8.31/(9.81*0.0289)≈29.271 m/K  */
+#define BMP280_ALT_CONST_Q24_8 7493
+
 /**
  * @name MEASUREMENT CONTROL (CTRL_MEAS)
  * @brief measuremnt control byte predefined values, masks and setting/getting macros
@@ -114,11 +132,11 @@
 #define BMP280_CTRL_MEAS_GET_OSRS_P(ctrl_meas) ((uint8_t)((ctrl_meas) & BMP280_MASK_CTRL_MEAS_OSRS_P))
 /**
  * @}
- * 
+ *
  */
 
 /**
- * @name CONFIG 
+ * @name CONFIG
  * @brief Config byte predefined values, masks and setting/getting macros
  * @{
  */
@@ -180,7 +198,6 @@
  *
  */
 
-
 /**
  * @name SPI helper macros
  * @{
@@ -189,7 +206,7 @@
 #define BMP280_ON_SPI_DEF(inst) {.spi = SPI_DT_SPEC_INST_GET(inst, 0, 0)}
 /**
  * @}
- * 
+ *
  */
 /**
  * @name Users constants to registers mapping
