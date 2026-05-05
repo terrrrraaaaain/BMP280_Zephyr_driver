@@ -176,9 +176,10 @@ static int calibTemp(const struct device *dev, struct sensor_value *temperature)
 /** @brief Compensation and conversion function adapted from Bosh BMP280 datasheet for pressure*/
 static int calibPress24_8(const struct device *dev, uint32_t *pressure);
 
-/** @brief  Converts  pressure from Q24.8 format to decimal */
+/** @brief Converts pressure from Q24.8 format to decimal */
 static int calibPress(const struct device *dev, struct sensor_value *pressure);
 
+/** @brief Computes altitude AML acrdoing to sea level pressure set via atribute*/
 static int computeAltitude(const struct device *dev, struct sensor_value *alt);
 
 /** @brief Waiting time estimation for new data in force mode */
@@ -787,11 +788,11 @@ static int calibPress24_8(const struct device *dev, uint32_t *pressure)
 		v2 = (((int64_t)data->calib.pCalib.dP8) * tempP) >> 19;
 		data->calib.p = ((tempP + v1 + v2) >> 8) + (((int64_t)data->calib.pCalib.dP7) << 4);
 		data->calib.p_cooef_cmpt = 1;
-		pressure = data->calib.p;
+		*pressure = data->calib.p;
 	}
 	else
 	{
-		pressure = data->calib.p;
+		*pressure = data->calib.p;
 	}
 	return 0;
 }
