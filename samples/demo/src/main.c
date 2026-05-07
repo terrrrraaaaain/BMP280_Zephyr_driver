@@ -12,12 +12,32 @@
 
 // #define SETTINGS // show config, then change and show again
 // #define MEASURE // measure loop
+// #define ALTIMETER //add altimeter to measure loop
 
 #define ALL // all above
 
+// uncomment to set own SEA LEVEL PRESSURE for altimeter
+#define SEA_LEVEL_PRESSURE (struct sensor_value){.val1 = 100 /*kPa*/, .val2=800000 /*mPa*/}
 #ifdef ALL
+#ifndef SETTINGS
 #define SETTINGS
+#endif
+#ifndef MEASURE
 #define MEASURE
+#endif
+#ifndef ALTIMETER
+#define ALTIMETER
+#endif
+#endif
+
+#ifdef ALTIMETER
+#ifndef MEASURE
+#define MEASURE
+#endif
+#endif
+
+#ifndef SEA_LEVEL_PRESSURE
+#define SEA_LEVEL_PRESSURE BMP280_DEFAULT_SEA_LEVEL_PRESSURE
 #endif
 
 void readAndPrint(const struct device *dev);
@@ -63,7 +83,9 @@ void readAndPrint(const struct device *dev)
 {
     struct sensor_value temp;
     struct sensor_value press;
-
+#ifdef ALTIMETER
+    struct sensor_value alt;
+#endif
     int64_t start_time, stop_time;
 
     start_time = k_uptime_get();
@@ -75,13 +97,24 @@ void readAndPrint(const struct device *dev)
     {
         int8_t c3 = sensor_channel_get(dev, SENSOR_CHAN_PRESS, &press);
         int8_t c2 = sensor_channel_get(dev, SENSOR_CHAN_AMBIENT_TEMP, &temp);
-
+#ifdef ALTIMETER
+        int8_t c4 = sensor_channel_get(dev, SENSOR_CHAN_ALTITUDE, &alt);
+#endif
         // show results
         printk("Fetch time: %lldms\n", stop_time - start_time);
+#ifdef ALTIMETER
+        printk("RETURN CODES\nfetch (%d), get (%d_%d_%d)\n", c, c2, c3, c4);
+#else
         printk("RETURN CODES\nfetch (%d), get (%d_%d)\n", c, c2, c3);
+
+#endif
         printk("Temp\t%d.%06d  *C\n", temp.val1, temp.val2);
         printk("Press\t%d.%06d kPa\n", press.val1, press.val2);
+#ifdef ALTIMETER
+
+        printk("Alt AMSL \t%d.%06d m\n", alt.val1, alt.val2);
         printk("---------------------------\n");
+#endif
     }
     else
     {
@@ -159,6 +192,10 @@ void dumpConfiguration(const struct device *dev)
 
     c2 = sensor_attr_get(dev, SENSOR_CHAN_PRESS, BMP280_ATTR_FILTER, &config);
     printk("FILTER(%d)\t%s\n", c2, CFG_TO_STR(filter_names, config));
+#ifdef ALTIMETER
+    c2 = sensor_attr_get(dev, SENSOR_CHAN_ALL, BMP280_ATTR_PRESS_SEA_LEVEL, &config);
+    printk("SEA LEVEL PRESS(%d)\t%d.%06d\n",c2, config.val1, config.val2 );
+#endif
 }
 
 void setConfiguration(const struct device *dev)
@@ -180,4 +217,8 @@ void setConfiguration(const struct device *dev)
 
     c2 = sensor_attr_set(dev, SENSOR_CHAN_ALL, BMP280_ATTR_MODE, &BMP280_MODE_NORMAL);
     printk("MODE SET CODE(%d)\t\n", c2);
+#ifdef ALTIMETER
+    c2 = sensor_attr_set(dev, SENSOR_CHAN_ALL, BMP280_ATTR_PRESS_SEA_LEVEL, &SEA_LEVEL_PRESSURE);
+    printk("SEA LEVEL PRESS SET CODE(%d)\t\n", c2);
+#endif
 }

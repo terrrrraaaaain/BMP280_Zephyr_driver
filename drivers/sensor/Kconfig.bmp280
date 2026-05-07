@@ -8,3 +8,10 @@ config CUSTOM_BMP280
     depends on SENSOR
     help
         Enable driver for unified BMP280 sensor
+
+config CUSTOM_BMP280_USE_ALTIMETER
+    bool "CUSTOM_BMP280 altimeter functionality (FT)"
+    default n
+    depends on DT_HAS_CUSTOM_BMP280_ENABLED
+    help
+        Enable altimeter functionality for unified BMP280 sensor driver

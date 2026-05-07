@@ -134,7 +134,9 @@ struct bmp280_data
 {
 	uint8_t press_raw[3];
 	uint8_t temp_raw[3];
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
 	uint32_t pressSL;
+#endif
 	uint8_t ctrl_meas;
 	struct bmp280_calibData calib;
 };
@@ -179,12 +181,18 @@ static int calibPress24_8(const struct device *dev, uint32_t *pressure);
 /** @brief Converts pressure from Q24.8 format to decimal */
 static int calibPress(const struct device *dev, struct sensor_value *pressure);
 
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
 /** @brief Computes altitude AML acrdoing to sea level pressure set via atribute*/
 static int computeAltitude(const struct device *dev, struct sensor_value *alt);
+/**
+ * @brief Computes natural logartihm from @24.8 number for altitude compatation
+ * @returns natural logartihm of x in Q20.20
+ */
+static int64_t ln(uint32_t x);
+#endif
 
 /** @brief Waiting time estimation for new data in force mode */
 static uint16_t bmp280_timeToRead_ms(const struct device *dev);
-
 /** @brief Software reset of sensor with DT parameters initialization*/
 static int bmp280_softResetToDefault(const struct device *dev);
 /** @brief Software reset of sensor */
@@ -259,7 +267,6 @@ static int bmp280_init_bare(const struct device *dev)
 
 	data->calib.t_cooef_cmpt = 0; // reset temp calibration info readiness flag for pressure calibration
 	data->calib.p_cooef_cmpt = 0; // reset pressure calibration info readiness flag for altitude calibration
-
 	bmp280_getCtrlMeas(dev);
 	return 0;
 }
@@ -401,6 +408,14 @@ static int bmp280_sample_fetch(const struct device *dev, enum sensor_channel cha
 			return bmp280_getPressureRaw(dev);
 		return c;
 		break;
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
+	case SENSOR_CHAN_ALTITUDE:
+		c = bmp280_getTemperatureRaw(dev);
+		if (c == 0)
+			return bmp280_getPressureRaw(dev);
+		return c;
+		break;
+#endif
 	case SENSOR_CHAN_ALL:
 		int c = bmp280_getTemperatureRaw(dev);
 		if (c == 0)
@@ -437,6 +452,12 @@ static int bmp280_channel_get(const struct device *dev, enum sensor_channel chan
 			calibTemp(dev, &dummy);
 		}
 		return calibPress(dev, reading);
+
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
+	case SENSOR_CHAN_ALTITUDE:
+		return computeAltitude(dev, reading);
+#endif
+
 	default:
 		return -ENOTSUP;
 	}
@@ -449,7 +470,7 @@ static int bmp280_channel_get(const struct device *dev, enum sensor_channel chan
  * @param dev Pointer to device structure
  * @param channel Channel for which attributes are set (supported SENSOR_CHAN_AMBIENT_TEMP, SENSOR_CHAN_PRESS,SENSOR_CHAN_ALL)
  * @param attr Attribute to be set (supported SENSOR_ATTR_OVERSAMPLING (only in sleep mode), BMP280_ATTR_T_STANDBY,
- * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE (only in sleep mode))
+ * 				BMP280_ATTR_FILTER,BMP280_ATTR_3_WIRE_SPI (only for BMP280 on SPI bus),BMP280_ATTR_RESET,BMP280_ATTR_MODE (only in sleep mode),BMP280_ATTR_)
  * @param val	Pointer to sensor_value structure where the value set channel's attribute to
  * @see include/zephyr/drivers/sensor/custom_bmp280.h for predefined values and custom attributes
  * @return 0 on success, negative errno code from I2C/SPI bus driver on communication failure
@@ -569,6 +590,11 @@ static int bmp280_attr_set(const struct device *dev, enum sensor_channel channel
 		}
 		else
 			return -ENOTSUP;
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
+	case BMP280_ATTR_PRESS_SEA_LEVEL:
+		data->pressSL = (uint32_t)val->val1 * 256000 + (uint32_t)(((uint64_t)val->val2 * 256) / 1000);
+		return 0;
+#endif
 	default:
 		return -ENOTSUP;
 	}
@@ -661,6 +687,12 @@ static int bmp280_attr_get(const struct device *dev, enum sensor_channel channel
 		}
 		else
 			return -ENOTSUP;
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
+	case BMP280_ATTR_PRESS_SEA_LEVEL:
+		val->val1 = (int32_t)(data->pressSL / 256000);
+		val->val2 = (int32_t)(((int64_t)(data->pressSL % 256000)) * 1000) / 256;
+		return 0;
+#endif
 	default:
 		break;
 	}
@@ -801,31 +833,36 @@ static int calibPress(const struct device *dev, struct sensor_value *pressure)
 {
 	uint32_t tempP = 0;
 	calibPress24_8(dev, &tempP);
-	tempP *= 1000;		// mPa
-	tempP = tempP >> 8; // conversion from 24.8 code to integer mPa
-	pressure->val1 = (int32_t)tempP / 1000000;
-	pressure->val2 = (int32_t)tempP % 1000000;
+	pressure->val1 = (int32_t)(tempP / 256000);
+	pressure->val2 = (int32_t)(((int64_t)(tempP % 256000)) * 1000) / 256;
 	return 0;
 }
 
-static int32_t ln(uint32_t x)
+#ifdef CONFIG_CUSTOM_BMP280_USE_ALTIMETER
+static int64_t ln(uint32_t x)
 {
-	int32_t result = 0;
+	int64_t result = 0;
 	int32_t n = (find_msb_set(x) - 1) - 8;
-	result = n * BMP280_LN2_Q24_8;
+	uint64_t x64 = ((uint64_t)x) << (20 - 8);
+	result = n * BMP280_LN2_Q20_20;
 	if (n >= 0)
-		x = x >> n;
+		x64 = x64 >> n;
 	else
-		x = x << (-n);
-	x -= 256;
-
-	result += (int32_t)((((int64_t)BMP280_LN2_COOEF_1_Q24_8 * ((x * x) >> 8)) + ((int64_t)BMP280_LN2_COOEF_2_Q24_8 * x)) >> 8);
+		x64 = x64 << (-n);
+	x64 -= BMP280_1_Q20_20;
+	result += x64;
+	int64_t temp = (x64 * x64) >> 20;
+	result -= (temp) >> 1;
+	temp = (temp * x64) >> 20;
+	result += x64 / 3;
 	return result;
 }
 
 static int computeAltitude(const struct device *dev, struct sensor_value *alt)
 {
 	struct bmp280_data *data = dev->data;
+	if (data->pressSL == 0)
+		return -EINVAL;
 	uint32_t press;
 	uint32_t temp;
 	int ret = calibPress24_8(dev, &press);
@@ -834,14 +871,20 @@ static int computeAltitude(const struct device *dev, struct sensor_value *alt)
 	if (!data->calib.t_cooef_cmpt)
 	{
 		struct sensor_value dummy;
-		calibTemp(dev, &dummy);
+		ret = calibTemp(dev, &dummy);
+		if (ret)
+			return ret;
 	}
+	printk("∂ ln = %lld", ln(data->pressSL) - ln(press));
 	temp = ((data->calib.t / 20) + BMP280_CELSSIUS_TO_KELVIN_Q24_8);
-	int32_t h = (((int64_t)temp * (ln(data->pressSL) - ln(press)) + 128) >> 8) * BMP280_ALT_CONST_Q24_8 >> 8;
-	alt->val1 = h / 256;
-	alt->val2 = (int32_t)((int64_t)((h % 256) * 1000000) / 256);
-	return 0;
+	int32_t h = (int32_t)((temp * (ln(data->pressSL) - ln(press)) * BMP280_ALT_CONST_Q16_16) >> 28);
+	alt->val1 = h >> 16;
+	int64_t r = h % 65536;
+		alt->val2 = (int32_t)((r * 1000000) >> 16);
+
+		return 0;
 }
+#endif
 
 static bool bmp280_isImReady(const struct device *dev)
 {
@@ -1104,7 +1147,9 @@ const struct sensor_driver_api bmp280_api = {
 /* clang-format off */
 #define BMP280_DEF(inst)                                                                             \
 	static struct bmp280_data bmp280_data_##inst = {                                                 \
-		/* initialize RAM values as needed, e.g.: */                                                 \
+		COND_CODE_1(CONFIG_CUSTOM_BMP280_USE_ALTIMETER, (                                			 \
+            .pressSL = DT_INST_PROP_OR(inst, pressure_sea_level, 0) << 8    	        			 \
+        ), ())                              														 \
 	};                                                                                               \
 	static const struct bmp280_config bmp280_config_##inst = {                                       \
 		.ioAPI = {                                                                                   \

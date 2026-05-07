@@ -6,6 +6,7 @@ Compatible with Zephyr RTOS
 - Fully customizable via Kconfig, Device Tree and runtime via  ```sensor_attr_set```
 - Supports Zephyr Sensor API
 - Supports Bosch Sensortec Compensation Formula
+- Supports altimeter functions
 ## Quick Start
 1. Copy this repo to your project
 2. Add to main `CMakeLists.txt` file this declaration:
@@ -18,6 +19,7 @@ Compatible with Zephyr RTOS
     CONFIG_I2C=y
     CONFIG_SENSOR=y
     CONFIG_BMP280=y
+    CONFIG_CUSTOM_BMP280_USE_ALTIMETER=y // set to y to enable altimeter functionality (default: n)
     ```
 4. Define node in `app.overlay` like this:
     ```
@@ -36,10 +38,31 @@ Compatible with Zephyr RTOS
             pressure-oversampling = <BMP280_OVERSAMPLING_X16>;
             iir-filter = <BMP280_FILTER_X8>;
             t-standby = <BMP280_T_STANDBY_0_5MS>;
+            pressure-sea-level = <100325>; // define sea level pressure for altimeter functionality in Pascals
         };
         
     };
     ```
+
+## Demo
+Driver demo code can be found in `samples/demo`.
+
+You can run it like this:
+```bash
+    west build -p always -b esp32c6_devkitc/esp32c6/hpcore samples/demo
+    west flash
+``` 
+There are for options for demo:
+
+- `#define MEASURE` start measuring in a loop
+- `#define SETTINGS` to show current settings and then change them
+- `#define ALTIMETER` add altitude measurement to the loop
+
+- `#define ALL` combines all above
+
+And one constant
+- `#define SEA_LEVEL_PRESSURE (struct sensor_value){.val1 = 100 /*kPa*/, .val2=800000 /*mPa*/}` used to set sea level pressure as reference for altimeter functionality (use BMP280_DEFAULT_SEA_LEVEL_PRESSURE for normal pressure 1013.25hPa)
+
 ## Example
 ```c
     #include <zephyr/kernel.h>
@@ -69,22 +92,9 @@ Compatible with Zephyr RTOS
         return 0;
     }
 ```
-## Demo
-Driver demo code can be found in `samples/demo`.
-
-You can run it like this:
-```bash
-    west build -p always -b esp32c6_devkitc/esp32c6/hpcore samples/demo
-    west flash
-``` 
-There are three options for demo:
-
-- `#define MEASURE` start measuring in a loop
-- `#define SETTINGS` to show current settings and then change them
-- `#define ALL` combines all above
 
 ## Further Development
-- [ ] Altimeter channel
+- [x] Altimeter channel
 - [ ] SPI communication
 - [ ] Read and Decode API
 ## Credits

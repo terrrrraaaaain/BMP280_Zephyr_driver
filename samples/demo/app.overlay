@@ -15,6 +15,7 @@
         pressure-oversampling = <BMP280_OVERSAMPLING_X16>;
         iir-filter = <BMP280_FILTER_X8>;
         t-standby = <BMP280_T_STANDBY_62_5MS>;
+        pressure-sea-level = <100600>;
     };
     
 };

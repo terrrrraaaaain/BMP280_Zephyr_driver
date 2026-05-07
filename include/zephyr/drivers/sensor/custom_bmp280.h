@@ -25,7 +25,7 @@ enum bmp280_attribute
     BMP280_ATTR_3_WIRE_SPI,
     BMP280_ATTR_RESET,
     BMP280_ATTR_MODE,
-
+    BMP280_ATTR_PRESS_SEA_LEVEL
 };
 
 /**
@@ -97,7 +97,15 @@ enum bmp280_attribute
  */
 #define BMP280_RESET_TO_DEFAULT (struct sensor_value){.val1 = 1, .val2 = 0}
 #define BMP280_RESET_TO_SLEEP (struct sensor_value){.val1 = 2, .val2 = 0}
+/**
+ * @}
+ */
 
+/**
+ * @name BMP280 standard sea level pressure = 101.325 kPa
+ * @{
+ */
+#define BMP280_DEFAULT_SEA_LEVEL_PRESSURE (struct sensor_value){.val1 = 101, .val2 = 325000}
 /**
  * @}
  */

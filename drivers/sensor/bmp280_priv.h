@@ -73,20 +73,13 @@
 /** @brief Celssius to Kelvins converter*/
 #define BMP280_CELSSIUS_TO_KELVIN_Q24_8 69926
 
-/** @brief ln(2) in Q24.8*/
-#define BMP280_LN2_Q24_8 177
+/** @brief ln(2) in Q32.32*/
+#define BMP280_LN2_Q20_20 726817
+/** @brief */
+#define BMP280_1_Q20_20 (1LL << 20)
 
-/**
- * @name ln(x) aproximation cooefs in Q24.8
- * @{
- */
-#define BMP280_LN2_COOEF_1_Q24_8 72
-#define BMP280_LN2_COOEF_2_Q24_8 246
-/**
- * @}
- */
 /** @brief Barometric constant R/(g*M)≈8.31/(9.81*0.0289)≈29.271 m/K  */
-#define BMP280_ALT_CONST_Q24_8 7493
+#define BMP280_ALT_CONST_Q16_16 1918342
 
 /**
  * @name MEASUREMENT CONTROL (CTRL_MEAS)

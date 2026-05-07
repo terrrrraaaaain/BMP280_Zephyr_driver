@@ -37,6 +37,13 @@ properties:
     required: false
     default: 1 #BMP280_OVERSAMPLING_X1
     description: |
-      Temperature oversampling. THIS IS INDEX.
+      Pressure oversampling. THIS IS INDEX.
       Refer to <dt-bindings/sensor/custom_bmp280.h> for valid indices.
+  pressure-sea-level:
+    type: int
+    required: false
+    default: 101325
+    description: |
+      Pressure (Pa) on sea level for altitude computation. THIS IS NOT INDEX.
+      IT IS ADVICED TO SET THIS ON RUNTIME USING attr_set.
 
