@@ -52,7 +52,7 @@ You can run it like this:
     west build -p always -b esp32c6_devkitc/esp32c6/hpcore samples/demo
     west flash
 ``` 
-There are for options for demo:
+There are four options for demo:
 
 - `#define MEASURE` start measuring in a loop
 - `#define SETTINGS` to show current settings and then change them
@@ -61,7 +61,7 @@ There are for options for demo:
 - `#define ALL` combines all above
 
 And one constant
-- `#define SEA_LEVEL_PRESSURE (struct sensor_value){.val1 = 100 /*kPa*/, .val2=800000 /*mPa*/}` used to set sea level pressure as reference for altimeter functionality (use BMP280_DEFAULT_SEA_LEVEL_PRESSURE for normal pressure 1013.25hPa)
+- `#define SEA_LEVEL_PRESSURE (struct sensor_value){.val1 = 100 /*kPa*/, .val2=800000 /*mPa*/}` used to set sea level pressure as reference for altimeter functionality (use `BMP280_DEFAULT_SEA_LEVEL_PRESSURE` for normal pressure 1013.25hPa)
 
 ## Example
 ```c
